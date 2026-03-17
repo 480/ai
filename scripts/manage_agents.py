@@ -14,8 +14,8 @@ AGENT_NAMES = [
     "architect",
     "developer",
     "code-reviewer",
-    "code-reviewerer",
-    "repo-scout",
+    "code-reviewer2",
+    "code-scanner",
 ]
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SOURCE_AGENTS_DIR = REPO_ROOT / "agents"

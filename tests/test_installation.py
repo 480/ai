@@ -18,8 +18,8 @@ AGENTS = [
     "architect",
     "developer",
     "code-reviewer",
-    "code-reviewerer",
-    "repo-scout",
+    "code-reviewer2",
+    "code-scanner",
 ]
 
 
