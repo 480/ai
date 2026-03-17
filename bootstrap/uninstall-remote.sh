@@ -10,7 +10,7 @@ if [ -z "$token" ] && command -v gh >/dev/null 2>&1; then
 fi
 
 if [ -z "$token" ]; then
-  echo "Set GITHUB_TOKEN or log in with gh before running this installer." >&2
+  echo "Set GITHUB_TOKEN or log in with gh before running this uninstaller." >&2
   exit 1
 fi
 
@@ -36,4 +36,4 @@ fi
 
 mkdir -p "$checkout_dir"
 tar -xzf "$archive" -C "$checkout_dir" --strip-components=1
-sh "$checkout_dir/install.sh"
+sh "$checkout_dir/uninstall.sh"

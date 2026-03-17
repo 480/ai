@@ -767,6 +767,24 @@ class InstallationTests(unittest.TestCase):
                 {"default_agent": "architect", "provider": {"x": 1}},
             )
 
+    def test_remote_bootstrap_scripts_target_new_repo_and_local_entrypoints(self) -> None:
+        readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+        install_remote = (REPO_ROOT / "bootstrap" / "install-remote.sh").read_text(encoding="utf-8")
+        uninstall_remote = (REPO_ROOT / "bootstrap" / "uninstall-remote.sh").read_text(encoding="utf-8")
+
+        self.assertNotIn("| sh", readme)
+        self.assertNotIn("git clone https://github.com/480/ai.git", readme)
+        self.assertNotIn("clone-first", readme)
+        self.assertIn('tmp="$(mktemp)"', readme)
+        self.assertIn('bootstrap/install-remote.sh?ref=main" && sh "$tmp"', readme)
+        self.assertIn('bootstrap/uninstall-remote.sh?ref=main" && sh "$tmp"', readme)
+        self.assertIn('REPO="${BOOTSTRAP_REPO:-480/ai}"', install_remote)
+        self.assertIn('REPO="${BOOTSTRAP_REPO:-480/ai}"', uninstall_remote)
+        self.assertIn('sh "$checkout_dir/install.sh"', install_remote)
+        self.assertIn('sh "$checkout_dir/uninstall.sh"', uninstall_remote)
+        self.assertIn("Check your authentication and repo access.", install_remote)
+        self.assertIn("Check your authentication and repo access.", uninstall_remote)
+
 
 if __name__ == "__main__":
     unittest.main()
