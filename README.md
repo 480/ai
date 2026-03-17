@@ -23,6 +23,8 @@ The installer also sets `default_agent` to `architect` in `~/.config/opencode/op
 
 See `AGENTS.md` for role, model, and reasoning details.
 
+Installed agents default visible replies to the user's language. After an operator approves a plan, `architect` continues that plan automatically unless a real pause condition exists.
+
 ## Install
 
 These commands require authenticated access to the private `480/ai` repository.
