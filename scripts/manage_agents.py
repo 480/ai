@@ -205,25 +205,38 @@ def has_matching_managed_file_metadata(state: dict, name: str, destination: Path
 
 
 def is_safe_managed_install_target_without_backup_conflict(
-    state: dict, name: str, current_bytes: bytes | None, desired_bytes: bytes
+    state: dict, name: str, current_bytes: bytes | None, desired_bytes: bytes, force: bool = False
 ) -> bool:
+    if force:
+        return True
     if not is_managed_in_place(state, name):
         return False
     if state.get("pending_cleanup", {}).get(name):
         return False
-    if not has_matching_managed_file_metadata(state, name, installed_agent_path(name)):
-        return False
+    # If the file matches our last known metadata, it's safe to update even if bytes differ
+    if has_matching_managed_file_metadata(state, name, installed_agent_path(name)):
+        return True
     return current_bytes == desired_bytes
 
 
-def is_safe_managed_install_target(state: dict, name: str, current_bytes: bytes | None, desired_bytes: bytes) -> bool:
+def is_safe_managed_install_target(
+    state: dict, name: str, current_bytes: bytes | None, desired_bytes: bytes, force: bool = False
+) -> bool:
+    if force:
+        return True
     if has_live_backup(state, name):
+        # If we have a backup, we only overwrite if the file is still "our" managed file
+        return has_matching_managed_file_metadata(state, name, installed_agent_path(name))
+    return is_safe_managed_install_target_without_backup_conflict(state, name, current_bytes, desired_bytes, force)
+
+
+def is_ambiguous_interrupted_install_retry(state: dict, name: str, current_bytes: bytes | None, desired_bytes: bytes, force: bool = False) -> bool:
+    if force:
         return False
-    return is_safe_managed_install_target_without_backup_conflict(state, name, current_bytes, desired_bytes)
-
-
-def is_ambiguous_interrupted_install_retry(state: dict, name: str, current_bytes: bytes | None, desired_bytes: bytes) -> bool:
     if current_bytes != desired_bytes:
+        # If it's a managed update, it's not an ambiguous interruption
+        if has_matching_managed_file_metadata(state, name, installed_agent_path(name)):
+            return False
         return False
     if has_live_backup(state, name):
         return False
@@ -277,7 +290,7 @@ def ensure_source_agents_exist() -> None:
         raise SystemExit(f"Missing repo-managed agent files: {', '.join(missing)}")
 
 
-def install() -> None:
+def install(force: bool = False) -> None:
     ensure_source_agents_exist()
     config_path = CONFIG_DIR / "opencode.json"
     ensure_path_hierarchy_safe(config_path)
@@ -299,23 +312,26 @@ def install() -> None:
         live_backup = state_backup_path(state, name)
         backup_bytes = read_bytes(live_backup) if live_backup is not None else None
 
-        if is_ambiguous_interrupted_install_retry(state, name, current_bytes, desired_bytes):
+        if is_ambiguous_interrupted_install_retry(state, name, current_bytes, desired_bytes, force):
             raise SystemExit(
                 f"Refusing to continue install for {destination}; prior install state is incomplete or corrupted. "
                 "Resolve manually or uninstall before retrying."
             )
 
-        if current_bytes is not None and has_live_backup(state, name) and current_bytes != desired_bytes:
-            raise SystemExit(f"Refusing to overwrite {destination}; live file and backup both exist.")
+        if not force and current_bytes is not None and has_live_backup(state, name) and \
+           not has_matching_managed_file_metadata(state, name, destination) and current_bytes != desired_bytes:
+            raise SystemExit(f"Refusing to overwrite {destination}; live file was modified and backup exists.")
 
         if current_bytes is not None and (
-            not is_safe_managed_install_target(state, name, current_bytes, desired_bytes)
+            not is_safe_managed_install_target(state, name, current_bytes, desired_bytes, force)
             or (name in state["backups"] and not has_live_backup(state, name))
         ):
             if (
-                live_backup is not None
+                not force
+                and live_backup is not None
                 and current_bytes != desired_bytes
                 and current_bytes != backup_bytes
+                and not has_matching_managed_file_metadata(state, name, destination)
             ):
                 raise SystemExit(
                     f"Refusing to overwrite {destination}; uninstall state still tracks a different backup."

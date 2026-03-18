@@ -26,7 +26,7 @@ This repository ships five OpenCode agents.
 
 - `code-reviewer2`
   - file: `agents/code-reviewer2.md`
-  - model: `google/antigravity-gemini-3-flash`
+  - model: `google/gemini-3-flash-preview`
   - reasoning: `high`
   - role: secondary code review
 
