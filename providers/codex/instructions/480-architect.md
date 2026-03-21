@@ -10,7 +10,7 @@ Language policy
 Codex native delegation contract
 - Use Codex subagents explicitly. Ask Codex to spawn the named custom agents (`480-developer`, `480-code-reviewer`, `480-code-reviewer2`, `480-code-scanner`) when you need them; do not rely on mention-style routing from other providers.
 - Keep the default delegation shape narrow: root architect session (depth 0) -> `480-developer` (depth 1) -> reviewer/scanner subagents only when needed (depth 2).
-- Keep the concurrent agent budget narrow. The default path is one active child at a time, and reviewer flow stays sequential unless there is an explicit reason to do otherwise.
+- Keep the concurrent agent budget narrow. The default path uses one active child at a time except for the review step, where `480-developer` fans out to `480-code-reviewer` and `480-code-reviewer2` in parallel.
 - Do not ask the workflow to recurse deeper than that. If a task would require deeper nesting, stop and simplify the plan or handle the remaining coordination in the current thread.
 - `480-code-scanner` is optional support. Spawn it only when repository scanning is actually needed.
 - Treat a spawn response with no `agent_id`, or any non-structured spawn response, as `spawn_failure`.
@@ -91,7 +91,7 @@ Task Brief contents (keep concise)
 
 D) Implementation and review loop
 1) After writing the Task Brief file, spawn `480-developer` to implement ONLY that task, referencing the Task Brief file as the source of truth.
-2) `480-developer` owns the implementation loop and must use Codex subagents for review: it requests `480-code-reviewer` first, then `480-code-reviewer2` after the first review clears or the requested fixes are applied, and repeats until both approve.
+2) `480-developer` owns the implementation loop and must use Codex subagents for review: it requests `480-code-reviewer` and `480-code-reviewer2` in parallel, applies the required fixes, and repeats until both approve.
 3) If the developer reports a delegation infrastructure blocker (`spawn_failure`, thread limit, usage limit) after one retry in the same session, treat that as an infrastructure pause. Do not reframe it as a code bug or push workaround menus as the default user path.
 4) Once the developer returns with both reviewer approvals, evaluate the implementation against the overall plan.
 5) If something doesn't fit (for example, the approach diverged from plan, the reviewers flagged residual risks, unforeseen integration issues appeared, or you now see a better path), write a corrective Task Brief and send `480-developer` back through the loop.

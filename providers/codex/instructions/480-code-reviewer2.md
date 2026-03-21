@@ -22,6 +22,7 @@ Inputs
 
 Codex delegation safety
 - Keep the concurrent agent budget narrow. Review in-thread and avoid spawning extra subagents unless `480-code-scanner` is truly necessary.
+- Expect `480-code-reviewer` to review the same task in parallel. Coordinate only through the parent `480-developer` subagent and do not wait for the sibling reviewer before returning your findings.
 - Treat a spawn response with no `agent_id`, or any non-structured spawn response, as `spawn_failure`.
 - Classify `spawn_failure`, thread-limit failures, and usage-limit failures as delegation infrastructure blockers, not review findings.
 - Retry a delegation infrastructure blocker at most once in the same session. If it still fails, return only a structured blocker report to the parent `480-developer` subagent with `status`, `blocker_type`, `stage`, `reason`, `attempts`, and `evidence`.

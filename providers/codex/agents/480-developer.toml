@@ -54,8 +54,8 @@ Validation
 - Do not claim validation you did not perform. Only report completion after all checks pass.
 
 Codex native review loop
-- Keep the concurrent agent budget narrow. The default path is one active depth-2 subagent at a time.
-- After completing your implementation, request review from `480-code-reviewer` first and then `480-code-reviewer2`. Do not run both in parallel unless the parent `480` architect session explicitly asked for that exception.
+- Keep the concurrent agent budget narrow. The default path is one active depth-2 subagent at a time except for the review step, where both reviewer subagents run together.
+- After completing your implementation, request review from `480-code-reviewer` and `480-code-reviewer2` in parallel.
 - In each review request, include the Task Brief file path and a concise summary of your changes, and tell the reviewer to inspect the full diff for this task.
 - If either reviewer requests changes, make the minimal changes needed to satisfy the Task Brief and the review requests, then re-run the relevant checks and re-request review.
 - Iterate until BOTH reviewers approve. Any reviewer response without change requests counts as approval.
