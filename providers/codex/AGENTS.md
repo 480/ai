@@ -35,7 +35,7 @@ Codex custom agent는 아래 4개 서브에이전트만 제공합니다.
 - `480-code-reviewer2`
   - maps from: `480-code-reviewer2`
   - file: `providers/codex/agents/480-code-reviewer2.toml`
-  - model: `gpt-5.3-codex-spark`
+  - model: `gpt-5.4-mini`
   - reasoning: `medium`
   - sandbox: `read-only`
 
@@ -43,7 +43,7 @@ Codex custom agent는 아래 4개 서브에이전트만 제공합니다.
   - maps from: `480-code-scanner`
   - file: `providers/codex/agents/480-code-scanner.toml`
   - model: `gpt-5.4-mini`
-  - reasoning: `high`
+  - reasoning: `low`
   - sandbox: `workspace-write`
 
 ## 설치 이름과 경로
@@ -62,7 +62,12 @@ Codex CLI는 각 TOML의 `name` 필드를 custom agent 이름으로 사용합니
 
 - Codex는 native subagent workflow를 사용합니다. architect는 `480-developer`를 spawn하고, developer는 필요할 때만 reviewer/scanner 서브에이전트를 씁니다.
 - 기본 delegation depth는 2단계입니다: architect(depth 0) -> developer(depth 1) -> reviewer/scanner(depth 2).
-- `480-developer`는 구현 후 `480-code-reviewer`, `480-code-reviewer2`를 Codex 서브에이전트로 병렬 호출해 둘 다 승인받아야 합니다.
+- reviewer 기본 흐름은 순차입니다: `480-code-reviewer` 먼저, 그다음 `480-code-reviewer2`입니다. 병렬 리뷰는 기본값이 아닙니다.
+- 동시 agent budget은 좁게 유지합니다. 기본 경로는 한 번에 하나의 child agent만 활성화하는 것입니다.
+- spawn 응답에 `agent_id`가 없거나 구조화 응답이 아니면 `spawn_failure`로 간주합니다.
+- `spawn_failure`, thread limit, usage limit는 코드 구현 문제가 아니라 위임 인프라 blocker로 분류합니다.
+- 같은 세션 안에서 1회 재시도 후에도 blocker가 남으면 parent architect로 구조화된 blocker report만 반환합니다.
+- 사용자에게 `새 세션`이나 `예외 허용`을 기본 경로로 제시하지 않습니다.
 
 다음처럼 Codex CLI 프롬프트에서 바로 호출할 수 있습니다.
 문서와 예시는 Codex의 실제 자연어 호출 패턴을 기준으로 작성합니다.
@@ -70,7 +75,7 @@ Codex CLI는 각 TOML의 `name` 필드를 custom agent 이름으로 사용합니
 ```text
 Plan the next work for docs/480ai/example-topic/001-example-task.md.
 Have 480-developer implement docs/480ai/example-topic/001-example-task.md.
-Have 480-developer spawn 480-code-reviewer and 480-code-reviewer2 in parallel, wait for both approvals, and return a completion report.
+Have 480-developer request review from 480-code-reviewer first, then 480-code-reviewer2 after the first review is clear, and return a completion report.
 ```
 `기본 추천` 설치는 `providers/codex/agents/`의 체크인 산출물을 그대로 사용합니다.
 `고급` 설치는 선택한 모델 조합으로 임시 산출물을 렌더링한 뒤 같은 설치 경로에 복사합니다.

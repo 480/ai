@@ -179,6 +179,7 @@
         },
         "codex": {
           "name": "480-code-scanner",
+          "instruction_source": "providers/codex/instructions/480-code-scanner.md",
           "sandbox_mode": "workspace-write"
         }
       }

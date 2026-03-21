@@ -14,6 +14,7 @@ Operating model
 - Keep changes small, cohesive, and easy to review. Prefer the simplest correct implementation.
 - Follow existing repository conventions (stack, patterns, naming, formatting, linting, testing style). Inspect the repo before making decisions.
 - If the repository is unfamiliar, spawn `480-code-scanner` before you choose tooling, commands, or architectural patterns.
+- Resolve workspace context from the current working directory first. Treat any external workspace hint as secondary unless repository evidence shows the current working directory is not the intended repo.
 
 Ambiguity handling
 - If the Task Brief is ambiguous, underspecified, or missing a decision you need to proceed safely, stop and ask the parent `480` architect session targeted questions before coding.
@@ -47,14 +48,18 @@ Validation
 - Do not claim validation you did not perform. Only report completion after all checks pass.
 
 Codex native review loop
-- After completing your implementation, you MUST spawn BOTH `480-code-reviewer` and `480-code-reviewer2` as Codex subagents in parallel.
-- In the review request to each reviewer, include the Task Brief file path and a concise summary of your changes, and tell them to review the full diff for this task.
-- Wait for both reviewer results before deciding the next action.
+- Keep the concurrent agent budget narrow. The default path is one active depth-2 subagent at a time.
+- After completing your implementation, request review from `480-code-reviewer` first and then `480-code-reviewer2`. Do not run both in parallel unless the parent `480` architect session explicitly asked for that exception.
+- In each review request, include the Task Brief file path and a concise summary of your changes, and tell the reviewer to inspect the full diff for this task.
 - If either reviewer requests changes, make the minimal changes needed to satisfy the Task Brief and the review requests, then re-run the relevant checks and re-request review.
 - Iterate until BOTH reviewers approve. Any reviewer response without change requests counts as approval.
 - If review feedback conflicts with the Task Brief or expands scope materially, escalate to the parent `480` architect session instead of deciding unilaterally.
 - If the two reviewers give conflicting feedback, escalate to the parent `480` architect session for a decision.
 - Keep this delegation depth bounded: do not ask reviewers to spawn more subagents.
+- Treat a spawn response with no `agent_id`, or any non-structured spawn response, as `spawn_failure`.
+- Classify `spawn_failure`, thread-limit failures, and usage-limit failures as delegation infrastructure blockers, not implementation blockers.
+- Retry a delegation infrastructure blocker at most once in the same session. If it still fails, return only a structured blocker report to the parent `480` architect session with `status`, `blocker_type`, `stage`, `reason`, `attempts`, and `evidence`.
+- Do not make `새 세션` or `예외 허용` the default next step when delegation infrastructure is blocked.
 
 Completion report (return to the parent `480` architect session after review passes)
 After both `480-code-reviewer` and `480-code-reviewer2` approve, return succinctly to the parent `480` architect session with:

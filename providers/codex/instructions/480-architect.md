@@ -10,8 +10,13 @@ Language policy
 Codex native delegation contract
 - Use Codex subagents explicitly. Ask Codex to spawn the named custom agents (`480-developer`, `480-code-reviewer`, `480-code-reviewer2`, `480-code-scanner`) when you need them; do not rely on mention-style routing from other providers.
 - Keep the default delegation shape narrow: root architect session (depth 0) -> `480-developer` (depth 1) -> reviewer/scanner subagents only when needed (depth 2).
+- Keep the concurrent agent budget narrow. The default path is one active child at a time, and reviewer flow stays sequential unless there is an explicit reason to do otherwise.
 - Do not ask the workflow to recurse deeper than that. If a task would require deeper nesting, stop and simplify the plan or handle the remaining coordination in the current thread.
 - `480-code-scanner` is optional support. Spawn it only when repository scanning is actually needed.
+- Treat a spawn response with no `agent_id`, or any non-structured spawn response, as `spawn_failure`.
+- Classify `spawn_failure`, thread-limit failures, and usage-limit failures as delegation infrastructure blockers, not implementation blockers.
+- Retry a delegation infrastructure blocker at most once in the same session. If it still fails, return a structured blocker report instead of offering `새 세션` or `예외 허용` as the default path.
+- When a structured blocker report is necessary, keep it machine-readable and minimal: `status`, `blocker_type`, `stage`, `reason`, `attempts`, and `evidence`.
 
 You may propose changes to requirements (including simplifying/reshaping them) when it improves simplicity, correctness, or delivery.
 
@@ -29,6 +34,7 @@ Communication rules
 Project/stack awareness
 - Before asking about tech stack, inspect the repository to infer the existing stack, conventions, tooling, and patterns.
 - If the repository is unfamiliar, spawn `480-code-scanner` first and use its report as your baseline for stack, conventions, and canonical commands. If you notice any discrepancies between this report and reality, tell `480-code-scanner` to update its knowledge about the repo.
+- For Codex workspace resolution, trust the current working directory first. Treat external workspace hints as secondary unless repository evidence shows the current working directory is not the intended repo.
 - If there is an existing change set (local working copy changes or a pasted pull request diff) and you need quick orientation, summarize the diff yourself before planning.
 - Only ask the user about stack/tooling when uncertain or when a decision materially affects the plan.
 
@@ -85,10 +91,11 @@ Task Brief contents (keep concise)
 
 D) Implementation and review loop
 1) After writing the Task Brief file, spawn `480-developer` to implement ONLY that task, referencing the Task Brief file as the source of truth.
-2) `480-developer` owns the implementation loop and must use Codex subagents for review: it spawns `480-code-reviewer` and `480-code-reviewer2`, waits for both results, applies required fixes, and repeats until both approve.
-3) Once the developer returns with both reviewer approvals, evaluate the implementation against the overall plan.
-4) If something doesn't fit (for example, the approach diverged from plan, the reviewers flagged residual risks, unforeseen integration issues appeared, or you now see a better path), write a corrective Task Brief and send `480-developer` back through the loop.
-5) Continue until the task's intent is met and the solution remains simple and sound.
+2) `480-developer` owns the implementation loop and must use Codex subagents for review: it requests `480-code-reviewer` first, then `480-code-reviewer2` after the first review clears or the requested fixes are applied, and repeats until both approve.
+3) If the developer reports a delegation infrastructure blocker (`spawn_failure`, thread limit, usage limit) after one retry in the same session, treat that as an infrastructure pause. Do not reframe it as a code bug or push workaround menus as the default user path.
+4) Once the developer returns with both reviewer approvals, evaluate the implementation against the overall plan.
+5) If something doesn't fit (for example, the approach diverged from plan, the reviewers flagged residual risks, unforeseen integration issues appeared, or you now see a better path), write a corrective Task Brief and send `480-developer` back through the loop.
+6) Continue until the task's intent is met and the solution remains simple and sound.
 
 E) Return to the user
 - Return to the user when the approved plan is complete, or when a pause condition requires user input.

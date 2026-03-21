@@ -418,9 +418,9 @@ CODEX_MODEL_SELECTION_SCHEMA = ProviderModelSelectionSchema(
         roles={
             "480-architect": _role_config("gpt-5.4", "xhigh"),
             "480-developer": _role_config("gpt-5.4", "medium"),
-            "480-code-scanner": _role_config("gpt-5.4-mini", "high"),
+            "480-code-scanner": _role_config("gpt-5.4-mini", "low"),
             "480-code-reviewer": _role_config("gpt-5.4", "high"),
-            "480-code-reviewer2": _role_config("gpt-5.3-codex-spark", "medium"),
+            "480-code-reviewer2": _role_config("gpt-5.4-mini", "medium"),
         },
     ),
     advanced={

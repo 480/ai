@@ -405,8 +405,12 @@ class InstallationTests(unittest.TestCase):
         self.assertEqual(codex_developer.model, "gpt-5.4")
         self.assertEqual(codex_developer.effort, "medium")
 
+        codex_scanner = codex.recommended_role_model_config(specs["480-code-scanner"])
+        self.assertEqual(codex_scanner.model, "gpt-5.4-mini")
+        self.assertEqual(codex_scanner.effort, "low")
+
         codex_reviewer2 = codex.recommended_role_model_config(specs["480-code-reviewer2"])
-        self.assertEqual(codex_reviewer2.model, "gpt-5.3-codex-spark")
+        self.assertEqual(codex_reviewer2.model, "gpt-5.4-mini")
         self.assertEqual(codex_reviewer2.effort, "medium")
 
     def test_provider_model_profiles_define_advanced_curated_options_for_every_role(self) -> None:
@@ -3148,6 +3152,12 @@ class InstallationTests(unittest.TestCase):
         self.assertIn("`~/.codex/config.toml` 또는 `<project>/.codex/config.toml`", codex_index)
         self.assertIn("`features.multi_agent = true`와 `agents.max_depth = 2`만 반영", codex_index)
         self.assertIn("기본 delegation depth는 2단계입니다", codex_index)
+        self.assertIn("reviewer 기본 흐름은 순차입니다", codex_index)
+        self.assertIn("동시 agent budget은 좁게 유지합니다", codex_index)
+        self.assertIn("spawn 응답에 `agent_id`가 없거나 구조화 응답이 아니면 `spawn_failure`로 간주합니다.", codex_index)
+        self.assertIn("`spawn_failure`, thread limit, usage limit는 코드 구현 문제가 아니라 위임 인프라 blocker로 분류합니다.", codex_index)
+        self.assertIn("같은 세션 안에서 1회 재시도 후에도 blocker가 남으면 parent architect로 구조화된 blocker report만 반환합니다.", codex_index)
+        self.assertIn("사용자에게 `새 세션`이나 `예외 허용`을 기본 경로로 제시하지 않습니다.", codex_index)
         self.assertIn("기존 사용자 내용은 보존한 채 480ai 관리 블록만 덧붙입니다.", codex_index)
         self.assertIn("제거 시에는 480ai 관리 블록만 삭제합니다.", codex_index)
         self.assertIn(
@@ -3159,7 +3169,7 @@ class InstallationTests(unittest.TestCase):
             codex_index,
         )
         self.assertIn(
-            "Have 480-developer spawn 480-code-reviewer and 480-code-reviewer2 in parallel, wait for both approvals, and return a completion report.",
+            "Have 480-developer request review from 480-code-reviewer first, then 480-code-reviewer2 after the first review is clear, and return a completion report.",
             codex_index,
         )
         expected_gitignore_contract = (
@@ -3178,13 +3188,22 @@ class InstallationTests(unittest.TestCase):
             self.assertNotIn("tell the user to add that path to the repo's `.gitignore`", architect_doc)
         self.assertIn("Codex native delegation contract", codex_managed_guidance)
         self.assertIn("`480-developer` (depth 1) -> reviewer/scanner subagents only when needed (depth 2)", codex_managed_guidance)
+        self.assertIn("Keep the concurrent agent budget narrow.", codex_managed_guidance)
+        self.assertIn("Treat a spawn response with no `agent_id`, or any non-structured spawn response, as `spawn_failure`.", codex_managed_guidance)
+        self.assertIn("return a structured blocker report instead of offering `새 세션` or `예외 허용` as the default path.", codex_managed_guidance)
+        self.assertIn("trust the current working directory first", codex_managed_guidance)
 
         codex_developer = tomllib.loads((provider_agents_source_dir("codex") / "480-developer.toml").read_text(encoding="utf-8"))
-        self.assertIn("spawn BOTH `480-code-reviewer` and `480-code-reviewer2` as Codex subagents in parallel", codex_developer["developer_instructions"])
+        self.assertIn("request review from `480-code-reviewer` first and then `480-code-reviewer2`", codex_developer["developer_instructions"])
+        self.assertIn("Treat a spawn response with no `agent_id`, or any non-structured spawn response, as `spawn_failure`.", codex_developer["developer_instructions"])
         self.assertIn("return succinctly to the parent `480` architect session", codex_developer["developer_instructions"])
         codex_reviewer = tomllib.loads((provider_agents_source_dir("codex") / "480-code-reviewer.toml").read_text(encoding="utf-8"))
         self.assertIn("feedback goes back to the parent `480-developer` subagent", codex_reviewer["developer_instructions"])
         self.assertIn("Do not claim to notify the architect directly", codex_reviewer["developer_instructions"])
+        self.assertIn("return only a structured blocker report to the parent `480-developer` subagent", codex_reviewer["developer_instructions"])
+        codex_scanner = tomllib.loads((provider_agents_source_dir("codex") / "480-code-scanner.toml").read_text(encoding="utf-8"))
+        self.assertIn("Treat the current working directory as the primary workspace hint.", codex_scanner["developer_instructions"])
+        self.assertIn("If a Codex spawn response is missing `agent_id` or is not a structured response, treat it as `spawn_failure`.", codex_scanner["developer_instructions"])
 
     def test_repo_gitignore_tracks_only_current_planning_dir(self) -> None:
         gitignore = (REPO_ROOT / ".gitignore").read_text(encoding="utf-8")
@@ -3575,7 +3594,7 @@ class InstallationTests(unittest.TestCase):
         codex_reviewer2 = tomllib.loads(
             render_agents.render_codex_agent(specs["480-code-reviewer2"], codex_name_map)
         )
-        self.assertEqual(codex_reviewer2["model"], "gpt-5.3-codex-spark")
+        self.assertEqual(codex_reviewer2["model"], "gpt-5.4-mini")
         self.assertEqual(codex_reviewer2["model_reasoning_effort"], "medium")
 
     def test_check_outputs_reports_missing_and_extra_files(self) -> None:

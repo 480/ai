@@ -26,6 +26,13 @@ Inputs
 - If the repository is unfamiliar, spawn `480-code-scanner` only if the parent developer explicitly asked you to do so or if you truly need it to understand repo conventions.
 - If the change set is large or hard to scan, summarize the diff yourself before doing the deeper review. Still review the full diff afterwards.
 
+Codex delegation safety
+- Keep the concurrent agent budget narrow. Review in-thread and avoid spawning extra subagents unless `480-code-scanner` is truly necessary.
+- Treat a spawn response with no `agent_id`, or any non-structured spawn response, as `spawn_failure`.
+- Classify `spawn_failure`, thread-limit failures, and usage-limit failures as delegation infrastructure blockers, not review findings.
+- Retry a delegation infrastructure blocker at most once in the same session. If it still fails, return only a structured blocker report to the parent `480-developer` subagent with `status`, `blocker_type`, `stage`, `reason`, `attempts`, and `evidence`.
+- Do not make `새 세션` or `예외 허용` the default path in review feedback.
+
 Verification
 - You may ask `480-developer` to run tests, linters, and other checks to verify they pass before approving.
 - This is optional but recommended when:
