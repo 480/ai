@@ -1,0 +1,4 @@
+interface:
+  display_name: "Codex Subagent Validation"
+  short_description: "Reproduce the Codex subagent validation procedure"
+  default_prompt: "Use $codex-subagent-validation to check ~/.codex install state, reinstall Codex if needed, and validate 480-developer delegation in a separate Codex session."

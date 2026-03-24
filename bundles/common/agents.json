@@ -1,0 +1,188 @@
+{
+  "bundle_version": 1,
+  "targets": [
+    "opencode",
+    "claude",
+    "codex"
+  ],
+  "roles": [
+    {
+      "id": "480-architect",
+      "display_name": "480-architect",
+      "description": "Architects whole implementations.",
+      "role": "planning, scoping, and orchestrating the implementation/review loop",
+      "mode": "primary",
+      "model": "openai/gpt-5.4",
+      "reasoning": "xhigh",
+      "instruction_source": "bundles/common/instructions/480-architect.md",
+      "target_metadata": {
+        "opencode": {
+          "temperature": 0.1,
+          "tools": {
+            "write": true,
+            "edit": true,
+            "bash": true
+          }
+        },
+        "claude": {
+          "name": "480-architect",
+          "instruction_source": "providers/claude/instructions/480-architect.md",
+          "tools": [
+            "Agent(480-developer, 480-code-reviewer, 480-code-reviewer2, 480-code-scanner)",
+            "Read",
+            "Write",
+            "Edit",
+            "Glob",
+            "Grep",
+            "Bash",
+            "WebFetch"
+          ]
+        },
+        "codex": {
+          "name": "480",
+          "instruction_source": "providers/codex/instructions/480-architect.md",
+          "sandbox_mode": "workspace-write"
+        }
+      }
+    },
+    {
+      "id": "480-developer",
+      "display_name": "480-developer",
+      "description": "Writes careful and considered code.",
+      "role": "implementation",
+      "mode": "subagent",
+      "model": "openai/gpt-5.4",
+      "reasoning": "medium",
+      "instruction_source": "bundles/common/instructions/480-developer.md",
+      "target_metadata": {
+        "opencode": {
+          "temperature": 0.1,
+          "tools": {
+            "write": true,
+            "edit": true,
+            "bash": true
+          }
+        },
+        "claude": {
+          "name": "480-developer",
+          "tools": [
+            "Read",
+            "Write",
+            "Edit",
+            "Glob",
+            "Grep",
+            "Bash",
+            "WebFetch"
+          ]
+        },
+        "codex": {
+          "name": "480-developer",
+          "instruction_source": "providers/codex/instructions/480-developer.md",
+          "sandbox_mode": "workspace-write"
+        }
+      }
+    },
+    {
+      "id": "480-code-reviewer",
+      "display_name": "480-code-reviewer",
+      "description": "Reviews code for best practices and potential issues.",
+      "role": "primary code review",
+      "mode": "subagent",
+      "model": "openai/gpt-5.4",
+      "reasoning": "high",
+      "instruction_source": "bundles/common/instructions/480-code-reviewer.md",
+      "target_metadata": {
+        "opencode": {
+          "temperature": 0.1,
+          "tools": {
+            "write": false,
+            "edit": false,
+            "bash": true
+          }
+        },
+        "claude": {
+          "name": "480-code-reviewer",
+          "tools": [
+            "Read",
+            "Glob",
+            "Grep",
+            "Bash"
+          ]
+        },
+        "codex": {
+          "name": "480-code-reviewer",
+          "instruction_source": "providers/codex/instructions/480-code-reviewer.md",
+          "sandbox_mode": "read-only"
+        }
+      }
+    },
+    {
+      "id": "480-code-reviewer2",
+      "display_name": "480-code-reviewer2",
+      "description": "Reviews code for best practices and potential issues.",
+      "role": "secondary code review",
+      "mode": "subagent",
+      "model": "google/gemini-3-flash-preview",
+      "reasoning": "high",
+      "instruction_source": "bundles/common/instructions/480-code-reviewer2.md",
+      "target_metadata": {
+        "opencode": {
+          "temperature": 0.1,
+          "tools": {
+            "write": false,
+            "edit": false,
+            "bash": true
+          }
+        },
+        "claude": {
+          "name": "480-code-reviewer2",
+          "tools": [
+            "Read",
+            "Glob",
+            "Grep",
+            "Bash"
+          ]
+        },
+        "codex": {
+          "name": "480-code-reviewer2",
+          "instruction_source": "providers/codex/instructions/480-code-reviewer2.md",
+          "sandbox_mode": "read-only"
+        }
+      }
+    },
+    {
+      "id": "480-code-scanner",
+      "display_name": "480-code-scanner",
+      "description": "Scans a repository and reports stack, conventions, and commands.",
+      "role": "repository scanning and stack discovery",
+      "mode": "subagent",
+      "model": "openai/gpt-5.4-nano",
+      "reasoning": "high",
+      "instruction_source": "bundles/common/instructions/480-code-scanner.md",
+      "target_metadata": {
+        "opencode": {
+          "temperature": 0.1,
+          "tools": {
+            "write": true,
+            "edit": true,
+            "bash": true
+          }
+        },
+        "claude": {
+          "name": "480-code-scanner",
+          "tools": [
+            "Read",
+            "Glob",
+            "Grep",
+            "Bash"
+          ]
+        },
+        "codex": {
+          "name": "480-code-scanner",
+          "instruction_source": "providers/codex/instructions/480-code-scanner.md",
+          "sandbox_mode": "workspace-write"
+        }
+      }
+    }
+  ]
+}
