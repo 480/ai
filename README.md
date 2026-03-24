@@ -1,5 +1,7 @@
 # 480 agents
 
+> Internal use only: this repository is currently intended for Imweb employees.
+
 Install the five 480 agents into OpenCode, Claude Code, and Codex CLI to get a development agent set optimized for the plan -> implement -> review loop.
 
 ## What are the 480 agents?
