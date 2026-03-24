@@ -68,6 +68,7 @@ Codex install/uninstall also clean up legacy `480-architect.toml` and `480.toml`
 - Reviewers review in-thread. `480-code-reviewer` and `480-code-reviewer2` do not spawn additional subagents.
 - Keep the concurrent agent budget narrow. Outside the review step, the default path activates only one child agent at a time.
 - When possible, the architect plans and delegates with a dedicated worktree and task branch as the default operating model.
+- When active worktrees or related task branches exceed five, suggest cleanup and offer to do it after user confirmation.
 - Merge or completed worktree deletion only happens when the user explicitly requests it.
 - Codex manages child thread lifecycle itself. Do not add explicit close enforcement unless a separate platform contract requires it.
 - When waiting on a Codex child agent, prefer longer waits over short polling loops.
