@@ -190,6 +190,7 @@ MANAGED_CONFIG_STATE_KEY = "managed_config"
 CODEX_REQUIRED_SETTINGS = (
     ("features", "multi_agent", "true", True),
     ("agents", "max_depth", "2", 2),
+    ("agents", "max_threads", "100", 100),
 )
 
 
@@ -291,6 +292,20 @@ def _table_header_pattern(table_name: str) -> re.Pattern[str]:
     return re.compile(rf"(?m)^\[{re.escape(table_name)}\]\s*(?:#.*)?$")
 
 
+def _insert_toml_dotted_table_key(contents: str, table_name: str, key_name: str, rendered_value: str) -> tuple[str, bool]:
+    dotted_table_pattern = re.compile(
+        rf"(?m)^[ \t]*{re.escape(table_name)}\.[A-Za-z0-9_-]+\s*=\s*[^#\n]*(?:\s*#.*)?$"
+    )
+    matches = list(dotted_table_pattern.finditer(contents))
+    if not matches:
+        return contents, False
+
+    last_match = matches[-1]
+    insert_at = last_match.end()
+    line = f"\n{table_name}.{key_name} = {rendered_value}"
+    return contents[:insert_at] + line + contents[insert_at:], True
+
+
 def _merge_toml_table_key(contents: str, table_name: str, key_name: str, rendered_value: str) -> tuple[str, bool]:
     dotted_key = f"{table_name}.{key_name}"
     updated, changed = _replace_toml_key_assignment(contents, dotted_key, rendered_value)
@@ -299,6 +314,9 @@ def _merge_toml_table_key(contents: str, table_name: str, key_name: str, rendere
 
     table_match = _table_header_pattern(table_name).search(contents)
     if table_match is None:
+        updated, changed = _insert_toml_dotted_table_key(contents, table_name, key_name, rendered_value)
+        if changed:
+            return updated, True
         block = f"[{table_name}]\n{key_name} = {rendered_value}\n"
         if not contents:
             return block, True
