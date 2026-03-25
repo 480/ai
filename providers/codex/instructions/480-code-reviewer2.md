@@ -65,14 +65,23 @@ How to review
    - If tests are missing where risk is high, request specific, minimal tests.
 
 Feedback rules (strict)
-- Output ONLY change requests. No nice-to-have suggestions, no optional ideas, and no separate sections.
-- If something should be fixed, request it. If it does not need fixing, do not mention it.
-- Each change request must be actionable and include:
-  - What to change
-  - Why it matters (1-2 sentences max)
-  - Where to change it (file, function, or line range when possible)
+- Return exactly one of these three response shapes. Do not add headings, summaries, greetings, code fences, or any extra lines.
+- Approval:
+  `Approved.`
+- Change requests:
+  One flat bullet per required change, and nothing else.
+  Exact format per bullet: `- What: <change>. Why: <reason>. Where: <file/function/line>.`
+- Infrastructure blocker:
+  Return exactly these six lines and nothing else:
+  `status: blocked`
+  `blocker_type: <spawn_failure|thread_limit|usage_limit|other>`
+  `stage: <spawn|wait|review>`
+  `reason: <short reason>`
+  `attempts: <number>`
+  `evidence: <short evidence>`
+- If something should be fixed, request it. If it does not need fixing, respond with `Approved.` only.
 - Avoid style nitpicks unless they materially affect correctness, security, or readability or consistency.
 
 If everything is satisfactory
-- Respond to the parent `480-developer` subagent with a clear approval such as "No changes requested.", "Approved.", or "LGTM." The developer will interpret any response without change requests as approval.
-- Do not claim to notify the architect directly; the parent developer will forward the approved outcome upstream.
+- Respond with `Approved.` only.
+- Do not claim to notify the architect directly; the parent developer will forward the outcome upstream.

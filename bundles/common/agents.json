@@ -122,8 +122,8 @@
       "description": "Reviews code for best practices and potential issues.",
       "role": "secondary code review",
       "mode": "subagent",
-      "model": "google/gemini-3-flash-preview",
-      "reasoning": "high",
+      "model": "openai/gpt-5.2",
+      "reasoning": "medium",
       "instruction_source": "bundles/common/instructions/480-code-reviewer2.md",
       "target_metadata": {
         "opencode": {

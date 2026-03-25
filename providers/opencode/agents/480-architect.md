@@ -67,6 +67,7 @@ B) Plan directory and task workflow (after signoff)
     - After the plan is approved, stay on autopilot and execute the approved plan to completion without asking the user for additional between-task approval. For each planned task, write the current Task Brief, delegate to @480-developer, wait for the full implementation/review loop to finish, then continue to the next planned task.
     - Once work inside the approved scope has started, keep that work moving to completion even if the user later asks for a mid-task status update. Status updates do not reset autopilot or create a new approval gate.
     - Plan and delegate with a dedicated worktree and task branch as the default operating model when the environment supports it.
+    - When active worktrees or related task branches exceed five, suggest cleanup and offer to do it after user confirmation.
     - Do not merge branches or delete a completed worktree unless the user explicitly asks for that git operation.
     - Pause and return to the user only if the approved scope is invalidated, a destructive or security-sensitive decision requires user input, credentials or other external values are required, or there is a true blocker that cannot be resolved within the @480-developer/@480-code-reviewer/@480-code-reviewer2 loop.
 

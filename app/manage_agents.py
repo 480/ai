@@ -65,6 +65,13 @@ class InstallTuiUnavailableError(RuntimeError):
     pass
 
 
+class TuiNavigateBack:
+    pass
+
+
+TUI_NAVIGATE_BACK = TuiNavigateBack()
+
+
 @dataclass(frozen=True)
 class Choice:
     value: str
@@ -479,15 +486,22 @@ def tui_prompt_review(
     title: str,
     lines: list[str],
     footer: str,
-) -> None:
+    allow_back: bool = False,
+) -> None | TuiNavigateBack:
     import curses
 
+    left_key = getattr(curses, "KEY_LEFT", None)
     scroll_offset = 0
 
     while True:
         rendered_lines, max_body_rows = tui_rendered_body_lines(screen, lines)
         max_scroll_offset = max(0, len(rendered_lines) - max_body_rows)
-        scrollable_footer = footer if max_scroll_offset == 0 else f"{footer} | arrows/jk: scroll"
+        footer_parts = [footer]
+        if allow_back:
+            footer_parts.append("Left Arrow: Back")
+        if max_scroll_offset > 0:
+            footer_parts.append("Up/Down Arrow or j/k: Scroll")
+        scrollable_footer = " | ".join(footer_parts)
         total_lines, max_body_rows = tui_render_screen(
             screen,
             title=title,
@@ -500,6 +514,8 @@ def tui_prompt_review(
         key = screen.getch()
         if key in (curses.KEY_ENTER, 10, 13):
             return
+        if allow_back and left_key is not None and key == left_key:
+            return TUI_NAVIGATE_BACK
         if key in (curses.KEY_UP, ord("k")) and scroll_offset > 0:
             scroll_offset -= 1
             continue
@@ -525,7 +541,11 @@ def tui_prompt_multi_select(
     error: str | None = None
 
     while True:
-        lines: list[str] = ["You can select multiple providers.", ""]
+        lines: list[str] = [
+            "Select one or more providers.",
+            "Press Space to select or deselect.",
+            "",
+        ]
         for index, choice in enumerate(choices):
             cursor = ">" if index == highlighted_index else " "
             checked = "x" if choice.value in selected_values else " "
@@ -537,7 +557,7 @@ def tui_prompt_multi_select(
             screen,
             title=title,
             lines=lines,
-            footer="Space: toggle selection | Enter: next | arrows/jk: move",
+            footer="Space: Select/Deselect | Enter: Next | Up/Down Arrow or j/k: Move",
             error=error,
         )
 
@@ -553,7 +573,7 @@ def tui_prompt_multi_select(
         if key == ord(" "):
             highlighted_choice = choices[highlighted_index]
             if highlighted_choice.disabled:
-                error = f"{highlighted_choice.label} is not selectable yet."
+                error = f"{highlighted_choice.label} is not available yet."
                 continue
             if highlighted_choice.value in selected_values:
                 selected_values.remove(highlighted_choice.value)
@@ -563,7 +583,7 @@ def tui_prompt_multi_select(
             continue
         if key in (curses.KEY_ENTER, 10, 13):
             if not selected_values:
-                error = "You must select at least one provider."
+                error = "Select at least one provider."
                 continue
             return tuple(choice.value for choice in choices if choice.value in selected_values)
 
@@ -574,9 +594,11 @@ def tui_prompt_single_choice(
     title: str,
     choices: tuple[Choice, ...],
     default_value: str,
-) -> str:
+    allow_back: bool = False,
+) -> str | TuiNavigateBack:
     import curses
 
+    left_key = getattr(curses, "KEY_LEFT", None)
     highlighted_index = next(
         (index for index, choice in enumerate(choices) if choice.value == default_value and not choice.disabled),
         0,
@@ -596,7 +618,11 @@ def tui_prompt_single_choice(
             screen,
             title=title,
             lines=lines,
-            footer="Enter: select | arrows/jk: move",
+            footer=(
+                "Enter: Next | Left Arrow: Back | Up/Down Arrow or j/k: Move"
+                if allow_back
+                else "Enter: Next | Up/Down Arrow or j/k: Move"
+            ),
             error=error,
         )
 
@@ -609,10 +635,12 @@ def tui_prompt_single_choice(
             highlighted_index = (highlighted_index + 1) % len(choices)
             error = None
             continue
+        if allow_back and left_key is not None and key == left_key:
+            return TUI_NAVIGATE_BACK
         if key in (curses.KEY_ENTER, 10, 13):
             selected = choices[highlighted_index]
             if selected.disabled:
-                error = f"{selected.label} is not selectable yet."
+                error = f"{selected.label} is not available yet."
                 continue
             return selected.value
 
@@ -655,6 +683,7 @@ def build_install_summary_lines(requests: tuple[ProviderInstallRequest, ...]) ->
 def prompt_install_options_tui() -> InstallOptions:
     target_choices = required_interactive_provider_choices()
     default_target = interactive_default_target(target_choices)
+    role_specs = tuple(load_bundle())
     try:
         import curses
     except ImportError as exc:
@@ -671,97 +700,189 @@ def prompt_install_options_tui() -> InstallOptions:
             pass
         screen.keypad(True)
 
-        selected_targets = tui_prompt_multi_select(
-            screen,
-            title="Choose providers to install for 480/ai",
-            choices=target_choices,
-            default_values=(default_target,),
-        )
-
-        requests: list[ProviderInstallRequest] = []
-        for target in selected_targets:
-            provider = get_provider(target)
-            scope = tui_prompt_single_choice(
+        selected_targets = tuple(
+            tui_prompt_multi_select(
                 screen,
-                title=f"Choose the install scope for {provider.label}.",
-                choices=scope_choices_for_target(target),
-                default_value=DEFAULT_SCOPE,
+                title="Choose providers to install for 480/ai",
+                choices=target_choices,
+                default_values=(default_target,),
             )
+        )
+        state_by_target: dict[str, dict[str, Any]] = {}
 
-            activate_default = default_activation_for_target(target)
-            if activate_default is not None:
-                activate_default = (
-                    tui_prompt_single_choice(
+        def ensure_target_state(target: str) -> dict[str, Any]:
+            state = state_by_target.get(target)
+            if state is None:
+                provider = get_provider(target)
+                state = {
+                    "scope": DEFAULT_SCOPE,
+                    "activate_default": default_activation_for_target(target),
+                    "enable_teams": teams_flag_default_for_target(target),
+                    "model_mode": (
+                        "advanced"
+                        if DEFAULT_MODEL_SELECTION_MODE not in provider.supported_model_selection_modes()
+                        else DEFAULT_MODEL_SELECTION_MODE
+                    ),
+                    "role_options": {},
+                }
+                state_by_target[target] = state
+            return state
+
+        def steps_for_target(target: str) -> list[str]:
+            state = ensure_target_state(target)
+            steps = ["scope"]
+            if state["activate_default"] is not None:
+                steps.append("activate_default")
+            if state["enable_teams"] is not None:
+                steps.append("enable_teams")
+            steps.append("model_mode")
+            if state["model_mode"] == "advanced":
+                steps.extend(f"role:{spec.identifier}" for spec in role_specs)
+            return steps
+
+        target_index = 0
+        step_index = 0
+
+        while True:
+            while True:
+                target = selected_targets[target_index]
+                provider = get_provider(target)
+                state = ensure_target_state(target)
+                steps = steps_for_target(target)
+                current_step = steps[step_index]
+
+                if current_step == "scope":
+                    selection = tui_prompt_single_choice(
+                        screen,
+                        title=f"Choose the install scope for {provider.label}.",
+                        choices=scope_choices_for_target(target),
+                        default_value=state["scope"],
+                        allow_back=True,
+                    )
+                    if selection is TUI_NAVIGATE_BACK:
+                        if target_index == 0:
+                            selected_targets = tuple(
+                                tui_prompt_multi_select(
+                                    screen,
+                                    title="Choose providers to install for 480/ai",
+                                    choices=target_choices,
+                                    default_values=selected_targets,
+                                )
+                            )
+                            for selected_target in selected_targets:
+                                ensure_target_state(selected_target)
+                            target_index = 0
+                            step_index = 0
+                            continue
+                        target_index -= 1
+                        step_index = len(steps_for_target(selected_targets[target_index])) - 1
+                        continue
+                    state["scope"] = selection
+                elif current_step == "activate_default":
+                    selection = tui_prompt_single_choice(
                         screen,
                         title=f"Activate the default agent for {provider.label} now?",
                         choices=(
                             Choice(value="yes", label="Yes"),
                             Choice(value="no", label="No"),
                         ),
-                        default_value="yes" if activate_default else "no",
+                        default_value="yes" if state["activate_default"] else "no",
+                        allow_back=True,
                     )
-                    == "yes"
-                )
-
-            enable_teams = teams_flag_default_for_target(target)
-            if enable_teams is not None:
-                enable_teams = (
-                    tui_prompt_single_choice(
+                    if selection is TUI_NAVIGATE_BACK:
+                        step_index -= 1
+                        continue
+                    state["activate_default"] = selection == "yes"
+                elif current_step == "enable_teams":
+                    selection = tui_prompt_single_choice(
                         screen,
                         title=f"Enable the {provider.label} agent teams experimental flag?",
                         choices=(
                             Choice(value="yes", label="Yes", note="Required for team-centered workflows"),
                             Choice(value="no", label="No", note="Install only and keep existing behavior"),
                         ),
-                        default_value="yes" if enable_teams else "no",
+                        default_value="yes" if state["enable_teams"] else "no",
+                        allow_back=True,
                     )
-                    == "yes"
-                )
-            else:
-                enable_teams = None
-
-            model_mode = tui_prompt_single_choice(
-                screen,
-                title=f"Choose the model mode for {provider.label}.",
-                choices=model_mode_choices_for_target(target),
-                default_value=DEFAULT_MODEL_SELECTION_MODE,
-            )
-
-            model_selection: ProviderModelSelection | None = None
-            if model_mode == "advanced":
-                role_options: dict[str, str] = {}
-                for spec in load_bundle():
-                    default_option = provider.default_advanced_role_model_option(spec)
+                    if selection is TUI_NAVIGATE_BACK:
+                        step_index -= 1
+                        continue
+                    state["enable_teams"] = selection == "yes"
+                elif current_step == "model_mode":
+                    selection = tui_prompt_single_choice(
+                        screen,
+                        title=f"Choose the model mode for {provider.label}.",
+                        choices=model_mode_choices_for_target(target),
+                        default_value=state["model_mode"],
+                        allow_back=True,
+                    )
+                    if selection is TUI_NAVIGATE_BACK:
+                        step_index -= 1
+                        continue
+                    state["model_mode"] = selection
+                else:
+                    role_id = current_step.split(":", 1)[1]
+                    spec = next(spec for spec in role_specs if spec.identifier == role_id)
                     choices = tuple(
                         Choice(value=option.key, label=option.label, note=option.note)
                         for option in provider.advanced_role_model_options(spec.identifier)
                     )
-                    role_options[spec.identifier] = tui_prompt_single_choice(
+                    default_option_key = state["role_options"].get(role_id)
+                    if default_option_key is None:
+                        default_option_key = provider.default_advanced_role_model_option(spec).key
+                    selection = tui_prompt_single_choice(
                         screen,
                         title=f"Choose the model for {provider.label} / {spec.display_name}.",
                         choices=choices,
-                        default_value=default_option.key,
+                        default_value=default_option_key,
+                        allow_back=True,
                     )
-                model_selection = advanced_model_selection_for_target(target, role_options)
+                    if selection is TUI_NAVIGATE_BACK:
+                        step_index -= 1
+                        continue
+                    state["role_options"][role_id] = selection
 
-            requests.append(
-                ProviderInstallRequest(
-                    target=target,
-                    scope=scope,
-                    activate_default=activate_default,
-                    enable_teams=enable_teams,
-                    model_selection=model_selection,
+                steps = steps_for_target(target)
+                if step_index >= len(steps):
+                    step_index = len(steps) - 1
+                if step_index + 1 < len(steps):
+                    step_index += 1
+                    continue
+                if target_index + 1 < len(selected_targets):
+                    target_index += 1
+                    step_index = 0
+                    continue
+                break
+
+            requests = []
+            for target in selected_targets:
+                state = ensure_target_state(target)
+                model_selection = None
+                if state["model_mode"] == "advanced":
+                    model_selection = advanced_model_selection_for_target(target, state["role_options"])
+                requests.append(
+                    ProviderInstallRequest(
+                        target=target,
+                        scope=state["scope"],
+                        activate_default=state["activate_default"],
+                        enable_teams=state["enable_teams"],
+                        model_selection=model_selection,
+                    )
                 )
-            )
 
-        summary_lines = build_install_summary_lines(tuple(requests))
-        tui_prompt_review(
-            screen,
-            title="Install summary",
-            lines=summary_lines,
-            footer="Enter: start install",
-        )
-        return InstallOptions(providers=tuple(requests))
+            summary_lines = build_install_summary_lines(tuple(requests))
+            review_result = tui_prompt_review(
+                screen,
+                title="Install summary",
+                lines=summary_lines,
+                footer="Enter: Start install",
+                allow_back=True,
+            )
+            if review_result is TUI_NAVIGATE_BACK:
+                target_index = len(selected_targets) - 1
+                step_index = len(steps_for_target(selected_targets[target_index])) - 1
+                continue
+            return InstallOptions(providers=tuple(requests))
 
     try:
         return curses.wrapper(run)
