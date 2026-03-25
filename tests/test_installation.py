@@ -277,10 +277,27 @@ class InstallationTests(unittest.TestCase):
         self.assertIn("`attempts: <number>`", text)
         self.assertIn("`evidence: <short evidence>`", text)
 
+    def assert_reviewer_throughput_contract(self, text: str) -> None:
+        self.assertIn("The user's time is expensive.", text)
+        self.assertIn(
+            "converging quickly to either required changes or approval, and avoid creating avoidable back-and-forth.",
+            text,
+        )
+        self.assertIn(
+            "Avoid creating review churn from minor operational friction or speculative concerns.",
+            text,
+        )
+
     def assert_scanner_output_path_contract(self, text: str) -> None:
         self.assertIn("`docs/480ai/ARCHITECTURE.md`", text)
         self.assertNotIn("called ARCHITECTURE.md at the root of the repo", text)
         self.assertRegex(text, r"Do not modify any files except .*docs/480ai/ARCHITECTURE\.md")
+        self.assertIn("The user's time is expensive.", text)
+        self.assertRegex(text, r"remove avoidable stack(?:(?: and)? tooling|/tooling) questions early")
+        self.assertIn(
+            "Absorb small uncertainties with evidence-based judgments and explicit assumptions when that is sufficient.",
+            text,
+        )
 
     def assert_developer_role_identity_contract(self, text: str, *, codex_style: bool) -> None:
         if codex_style:
@@ -314,6 +331,9 @@ class InstallationTests(unittest.TestCase):
                 text,
             )
 
+        self.assertIn("The user's time is expensive.", text)
+        self.assertIn("inside this developer loop", text)
+        self.assertIn("Do not treat routine status requests, progress reports, or check-ins as a reason to pause", text)
         self.assertTrue(
             "Do not treat progress as completion or stop the implementation/review loop." in text
             or "Do not treat a progress update as a completion report or stop the implementation or review loop."
@@ -343,7 +363,15 @@ class InstallationTests(unittest.TestCase):
 
     def assert_architect_autopilot_worktree_contract(self, text: str) -> None:
         self.assertIn(
+            "The user's time is expensive. Once the required pre-implementation approvals are satisfied, the default responsibility is to carry the approved scope through to completion rather than handing routine coordination back to the user.",
+            text,
+        )
+        self.assertIn(
             "After the plan is approved, stay on autopilot and execute the approved plan to completion without asking the user for additional between-task approval.",
+            text,
+        )
+        self.assertIn(
+            "Absorb routine exceptions, minor operational friction, and ordinary mid-task judgment calls inside the agent loop whenever that can be done safely and within the approved scope.",
             text,
         )
         self.assertIn(
@@ -355,11 +383,19 @@ class InstallationTests(unittest.TestCase):
             text,
         )
         self.assertIn(
+            "Treat status reports, progress summaries, and mid-task check-ins as reporting only. They do not pause execution, reopen the agreed scope, or create a new approval gate.",
+            text,
+        )
+        self.assertIn(
             "Plan and delegate with a dedicated worktree and task branch as the default operating model when the environment supports it.",
             text,
         )
         self.assertIn(
             "Do not merge branches or delete a completed worktree unless the user explicitly asks for that git operation.",
+            text,
+        )
+        self.assertIn(
+            "Return to the user when the approved plan is complete, or when a pause condition requires user input. Do not treat routine progress reporting as a reason to stop execution and hand control back early.",
             text,
         )
 
@@ -4407,6 +4443,12 @@ manage_agents.install(target="codex", scope="user")
         opencode_index = provider_index_path("opencode").read_text(encoding="utf-8")
         claude_index = provider_index_path("claude").read_text(encoding="utf-8")
         codex_index = provider_index_path("codex").read_text(encoding="utf-8")
+        common_architect = (REPO_ROOT / "bundles" / "common" / "instructions" / "480-architect.md").read_text(
+            encoding="utf-8"
+        )
+        codex_architect = (REPO_ROOT / "providers" / "codex" / "instructions" / "480-architect.md").read_text(
+            encoding="utf-8"
+        )
         opencode_architect = (provider_agents_source_dir("opencode") / "480-architect.md").read_text(encoding="utf-8")
         claude_architect = (provider_agents_source_dir("claude") / "480-architect.md").read_text(encoding="utf-8")
         codex_managed_guidance = render_agents.render_codex_managed_guidance(agent_bundle.load_bundle())
@@ -4482,11 +4524,14 @@ manage_agents.install(target="codex", scope="user")
             "Ask the user to reply with a short, explicit approval word in their current language "
             "(for example, `approved`)."
         )
-        for architect_doc in (opencode_architect, claude_architect, codex_managed_guidance):
+        for architect_doc in (common_architect, codex_architect, opencode_architect, codex_managed_guidance):
             self.assertIn(expected_gitignore_contract, architect_doc)
             self.assertIn(expected_short_signoff_contract, architect_doc)
             self.assert_architect_autopilot_worktree_contract(architect_doc)
             self.assertNotIn("tell the user to add that path to the repo's `.gitignore`", architect_doc)
+        self.assertIn(expected_gitignore_contract, claude_architect)
+        self.assertIn(expected_short_signoff_contract, claude_architect)
+        self.assert_architect_autopilot_worktree_contract(claude_architect)
         self.assertIn("Codex native delegation contract", codex_managed_guidance)
         self.assertIn("`480-developer` (depth 1) -> reviewer/scanner subagents only when needed (depth 2)", codex_managed_guidance)
         self.assertIn("Keep the concurrent agent budget narrow.", codex_managed_guidance)
@@ -4503,6 +4548,10 @@ manage_agents.install(target="codex", scope="user")
         self.assertIn("Use follow-up status checks sparingly", codex_managed_guidance)
         self.assertIn("prefer the repo or worktree implied by the Task Brief path", codex_managed_guidance)
 
+        common_developer = (REPO_ROOT / "bundles" / "common" / "instructions" / "480-developer.md").read_text(
+            encoding="utf-8"
+        )
+        self.assert_developer_role_identity_contract(common_developer, codex_style=False)
         self.assert_developer_role_identity_contract(
             (provider_agents_source_dir("opencode") / "480-developer.md").read_text(encoding="utf-8"),
             codex_style=False,
@@ -4518,6 +4567,10 @@ manage_agents.install(target="codex", scope="user")
         self.assertIn(
             "Resolve workspace context from the Task Brief path and any explicit absolute repository or worktree path first.",
             (provider_agents_source_dir("claude") / "480-developer.md").read_text(encoding="utf-8"),
+        )
+        self.assert_developer_role_identity_contract(
+            (REPO_ROOT / "providers" / "codex" / "instructions" / "480-developer.md").read_text(encoding="utf-8"),
+            codex_style=True,
         )
         self.assert_codex_developer_review_parse_contract(
             (REPO_ROOT / "providers" / "codex" / "instructions" / "480-developer.md").read_text(encoding="utf-8")
@@ -4593,9 +4646,13 @@ manage_agents.install(target="codex", scope="user")
         self.assertNotIn("docs/coding-team/", gitignore)
 
     def test_code_scanner_reasoning_is_high_everywhere(self) -> None:
+        common_scanner = (REPO_ROOT / "bundles" / "common" / "instructions" / "480-code-scanner.md").read_text(
+            encoding="utf-8"
+        )
         code_scanner_agent = (provider_agents_source_dir("opencode") / "480-code-scanner.md").read_text(encoding="utf-8")
         agents_index = provider_index_path("opencode").read_text(encoding="utf-8")
 
+        self.assert_scanner_output_path_contract(common_scanner)
         self.assertIn("model: openai/gpt-5.4-nano", code_scanner_agent)
         self.assertIn("reasoningEffort: high", code_scanner_agent)
         self.assertNotIn("reasoningEffort: xhigh", code_scanner_agent)
@@ -5014,9 +5071,15 @@ manage_agents.install(target="codex", scope="user")
             ("480-code-reviewer", "gpt-5.4", "high"),
             ("480-code-reviewer2", "gpt-5.2", "medium"),
         ):
+            common_source_instruction = (
+                REPO_ROOT / "bundles" / "common" / "instructions" / f"{agent_id}.md"
+            ).read_text(encoding="utf-8")
+            self.assert_reviewer_throughput_contract(common_source_instruction)
+
             source_instruction = (
                 REPO_ROOT / "providers" / "codex" / "instructions" / f"{agent_id}.md"
             ).read_text(encoding="utf-8")
+            self.assert_reviewer_throughput_contract(source_instruction)
             self.assert_codex_reviewer_feedback_contract(source_instruction)
 
             checked_in_toml = (
@@ -5025,6 +5088,7 @@ manage_agents.install(target="codex", scope="user")
             checked_in_agent = tomllib.loads(checked_in_toml)
             self.assertEqual(checked_in_agent["model"], expected_model)
             self.assertEqual(checked_in_agent["model_reasoning_effort"], expected_effort)
+            self.assert_reviewer_throughput_contract(checked_in_agent["developer_instructions"])
             self.assert_codex_reviewer_feedback_contract(checked_in_agent["developer_instructions"])
 
             rendered_agent = tomllib.loads(
@@ -5033,6 +5097,7 @@ manage_agents.install(target="codex", scope="user")
             self.assertEqual(rendered_agent["model"], expected_model)
             self.assertEqual(rendered_agent["model_reasoning_effort"], expected_effort)
             self.assertEqual(rendered_agent["developer_instructions"], checked_in_agent["developer_instructions"])
+            self.assert_reviewer_throughput_contract(rendered_agent["developer_instructions"])
             self.assert_codex_reviewer_feedback_contract(rendered_agent["developer_instructions"])
 
     def test_check_outputs_reports_missing_and_extra_files(self) -> None:
