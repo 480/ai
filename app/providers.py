@@ -279,7 +279,12 @@ def _role_option(
 
 OPENCODE_MODEL_SELECTION_SCHEMA = ProviderModelSelectionSchema(
     supported_modes=("recommended", "advanced"),
-    recommended=ProviderRecommendedModelProfile(source="bundle"),
+    recommended=ProviderRecommendedModelProfile(
+        source="bundle",
+        overrides={
+            "480-code-reviewer2": _role_config("google/gemini-3-flash-preview", "high"),
+        },
+    ),
     advanced={
         "480-architect": (
             _role_option("gpt-5.4-xhigh", "GPT-5.4 / xhigh", model="openai/gpt-5.4", effort="xhigh"),
@@ -419,8 +424,8 @@ CODEX_MODEL_SELECTION_SCHEMA = ProviderModelSelectionSchema(
             "480-architect": _role_config("gpt-5.4", "xhigh"),
             "480-developer": _role_config("gpt-5.4-mini", "medium"),
             "480-code-scanner": _role_config("gpt-5.3-codex-spark", "low"),
-            "480-code-reviewer": _role_config("gpt-5.4", "medium"),
-            "480-code-reviewer2": _role_config("gpt-5.4-mini", "high"),
+            "480-code-reviewer": _role_config("gpt-5.4", "high"),
+            "480-code-reviewer2": _role_config("gpt-5.2", "medium"),
         },
     ),
     advanced={
@@ -455,17 +460,18 @@ CODEX_MODEL_SELECTION_SCHEMA = ProviderModelSelectionSchema(
             _role_option("gpt-5.4-medium", "GPT-5.4 / medium", model="gpt-5.4", effort="medium"),
         ),
         "480-code-reviewer2": (
-            _role_option(
-                "gpt-5.4-mini-high",
-                "GPT-5.4 Mini / high",
-                model="gpt-5.4-mini",
-                effort="high",
-            ),
+            _role_option("gpt-5.2-medium", "GPT-5.2 / medium", model="gpt-5.2", effort="medium"),
             _role_option(
                 "spark-medium",
                 "Codex Spark / medium",
                 model="gpt-5.3-codex-spark",
                 effort="medium",
+            ),
+            _role_option(
+                "gpt-5.4-mini-high",
+                "GPT-5.4 Mini / high",
+                model="gpt-5.4-mini",
+                effort="high",
             ),
             _role_option("gpt-5.4-low", "GPT-5.4 / low", model="gpt-5.4", effort="low"),
         ),

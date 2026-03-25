@@ -56,8 +56,13 @@ Codex native review loop
 - The only allowed child delegation from this session is support work such as `480-code-reviewer`, `480-code-reviewer2`, or `480-code-scanner` within the current task. Never re-delegate the same task to another `480-developer`.
 - After completing your implementation, request review from `480-code-reviewer` and `480-code-reviewer2` in parallel.
 - In each review request, include the Task Brief file path and a concise summary of your changes, and tell the reviewer to inspect the full diff for this task.
+- Parse reviewer responses using the reviewer contract, in this order, instead of assuming long free-form feedback:
+  - Approval: treat exactly `Approved.` as approval.
+  - Change requests: treat one or more flat bullets in the form `- What: <change>. Why: <reason>. Where: <file/function/line>.` as required changes.
+  - Infrastructure blocker: treat exactly the six-line minimal report with `status: blocked`, `blocker_type`, `stage`, `reason`, `attempts`, and `evidence` as a delegation infrastructure blocker.
+- Do not treat a blocker report as approval, and do not infer approval from any response shape other than the explicit `Approved.` approval string.
 - If either reviewer requests changes, make the minimal changes needed to satisfy the Task Brief and the review requests, then re-run the relevant checks and re-request review.
-- Iterate until BOTH reviewers approve. Any reviewer response without change requests counts as approval.
+- Iterate until BOTH reviewers approve with the explicit `Approved.` approval string.
 - If review feedback conflicts with the Task Brief or expands scope materially, escalate to the parent `480` architect session instead of deciding unilaterally.
 - If the two reviewers give conflicting feedback, escalate to the parent `480` architect session for a decision.
 - Keep this delegation depth bounded: reviewers stay in-thread and do not spawn additional subagents.

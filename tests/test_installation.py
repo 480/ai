@@ -12,6 +12,7 @@ import tempfile
 import tomllib  # type: ignore[reportMissingImports]
 import unittest
 from contextlib import ExitStack, contextmanager, redirect_stderr, redirect_stdout
+from types import SimpleNamespace
 from unittest import mock
 from pathlib import Path
 
@@ -117,6 +118,7 @@ class FakeCursesScreen:
 class FakeCursesModule:
     KEY_UP = 259
     KEY_DOWN = 258
+    KEY_LEFT = 260
     KEY_ENTER = 343
     A_BOLD = 1
     A_DIM = 2
@@ -256,6 +258,25 @@ class InstallationTests(unittest.TestCase):
         self.assertIn("Review in-thread and do not spawn additional subagents from this reviewer.", text)
         self.assertNotIn("If you spawn `480-code-scanner`", text)
 
+    def assert_codex_reviewer_feedback_contract(self, text: str) -> None:
+        self.assertIn("Approval:", text)
+        self.assertIn("`Approved.`", text)
+        self.assertIn("If it does not need fixing, respond with `Approved.` only.", text)
+        self.assertNotIn("No changes requested.", text)
+        self.assertNotIn("LGTM.", text)
+        self.assertIn("One flat bullet per required change, and nothing else.", text)
+        self.assertIn(
+            "Exact format per bullet: `- What: <change>. Why: <reason>. Where: <file/function/line>.`",
+            text,
+        )
+        self.assertIn("Return exactly these six lines and nothing else:", text)
+        self.assertIn("`status: blocked`", text)
+        self.assertIn("`blocker_type: <spawn_failure|thread_limit|usage_limit|other>`", text)
+        self.assertIn("`stage: <spawn|wait|review>`", text)
+        self.assertIn("`reason: <short reason>`", text)
+        self.assertIn("`attempts: <number>`", text)
+        self.assertIn("`evidence: <short evidence>`", text)
+
     def assert_scanner_output_path_contract(self, text: str) -> None:
         self.assertIn("`docs/480ai/ARCHITECTURE.md`", text)
         self.assertNotIn("called ARCHITECTURE.md at the root of the repo", text)
@@ -298,6 +319,27 @@ class InstallationTests(unittest.TestCase):
             or "Do not treat a progress update as a completion report or stop the implementation or review loop."
             in text
         )
+
+    def assert_codex_developer_review_parse_contract(self, text: str) -> None:
+        self.assertIn(
+            "Parse reviewer responses using the reviewer contract, in this order, instead of assuming long free-form feedback:",
+            text,
+        )
+        self.assertIn("Approval: treat exactly `Approved.` as approval.", text)
+        self.assertIn(
+            "Change requests: treat one or more flat bullets in the form `- What: <change>. Why: <reason>. Where: <file/function/line>.` as required changes.",
+            text,
+        )
+        self.assertIn(
+            "Infrastructure blocker: treat exactly the six-line minimal report with `status: blocked`, `blocker_type`, `stage`, `reason`, `attempts`, and `evidence` as a delegation infrastructure blocker.",
+            text,
+        )
+        self.assertIn(
+            "Do not treat a blocker report as approval, and do not infer approval from any response shape other than the explicit `Approved.` approval string.",
+            text,
+        )
+        self.assertIn("Iterate until BOTH reviewers approve with the explicit `Approved.` approval string.", text)
+        self.assertNotIn("Any reviewer response without change requests counts as approval.", text)
 
     def assert_architect_autopilot_worktree_contract(self, text: str) -> None:
         self.assertIn(
@@ -517,9 +559,13 @@ class InstallationTests(unittest.TestCase):
         self.assertEqual(codex_scanner.model, "gpt-5.3-codex-spark")
         self.assertEqual(codex_scanner.effort, "low")
 
+        codex_reviewer = codex.recommended_role_model_config(specs["480-code-reviewer"])
+        self.assertEqual(codex_reviewer.model, "gpt-5.4")
+        self.assertEqual(codex_reviewer.effort, "high")
+
         codex_reviewer2 = codex.recommended_role_model_config(specs["480-code-reviewer2"])
-        self.assertEqual(codex_reviewer2.model, "gpt-5.4-mini")
-        self.assertEqual(codex_reviewer2.effort, "high")
+        self.assertEqual(codex_reviewer2.model, "gpt-5.2")
+        self.assertEqual(codex_reviewer2.effort, "medium")
 
     def test_provider_model_profiles_define_advanced_curated_options_for_every_role(self) -> None:
         role_ids = {spec.identifier for spec in agent_bundle.load_bundle()}
@@ -555,6 +601,14 @@ class InstallationTests(unittest.TestCase):
         self.assertEqual(
             get_provider("codex").default_advanced_role_model_option(specs["480-developer"]).key,
             "gpt-5.4-medium",
+        )
+        self.assertEqual(
+            get_provider("codex").default_advanced_role_model_option(specs["480-code-reviewer"]).key,
+            "gpt-5.4-high",
+        )
+        self.assertEqual(
+            get_provider("codex").default_advanced_role_model_option(specs["480-code-reviewer2"]).key,
+            "gpt-5.2-medium",
         )
 
     def test_target_agent_names_use_provider_registry_for_all_targets(self) -> None:
@@ -2542,6 +2596,7 @@ manage_agents.install(target="codex", scope="user")
 
         self.assertEqual(selected, ("opencode",))
         self.assertTrue(any(error for error in rendered_errors))
+        self.assertIn("Select at least one provider.", rendered_errors)
         self.assertIsNone(rendered_errors[-1])
 
     def test_prompt_install_options_tui_asks_each_provider_in_order_and_renders_summary(self) -> None:
@@ -2559,6 +2614,8 @@ manage_agents.install(target="codex", scope="user")
             FakeCursesModule.KEY_DOWN,
             10,
             FakeCursesModule.KEY_DOWN,
+            10,
+            10,
             10,
             10,
             10,
@@ -2603,6 +2660,19 @@ manage_agents.install(target="codex", scope="user")
         for role in CLAUDE_AGENTS:
             self.assert_screen_title_contains(ordered_titles, "Claude Code", role, "model")
 
+        provider_title, provider_lines, provider_footer = rendered_screens[0]
+        self.assertIn("provider", provider_title)
+        self.assertIn("Select one or more providers.", provider_lines)
+        self.assertIn("Press Space to select or deselect.", provider_lines)
+        self.assertEqual(
+            provider_footer,
+            "Space: Select/Deselect | Enter: Next | Up/Down Arrow or j/k: Move",
+        )
+        self.assertIn(
+            "Enter: Next | Left Arrow: Back | Up/Down Arrow or j/k: Move",
+            [footer for _title, _lines, footer in rendered_screens],
+        )
+
         summary_title, summary_lines, _summary_footer = rendered_screens[-1]
         self.assertIn("summary", summary_title)
         self.assert_summary_contains_provider(
@@ -2621,7 +2691,163 @@ manage_agents.install(target="codex", scope="user")
         )
         summary = "\n".join(summary_lines)
         self.assertRegex(summary, r"agent teams:\s*no")
-        self.assertIn("480-architect: sonnet-max", summary)
+
+    def test_prompt_install_options_tui_scope_back_moves_to_previous_provider_last_step(self) -> None:
+        keys = [
+            FakeCursesModule.KEY_DOWN,
+            ord(" "),
+            10,
+            10,
+            10,
+            10,
+            FakeCursesModule.KEY_LEFT,
+            FakeCursesModule.KEY_DOWN,
+            10,
+            10,
+            10,
+            10,
+            10,
+            10,
+            10,
+            10,
+            10,
+            10,
+            10,
+        ]
+        fake_curses = FakeCursesModule(screen=FakeCursesScreen(keys))
+
+        with (
+            self.patched_detected_interactive_providers("opencode", "claude", "codex"),
+            mock.patch.dict(sys.modules, {"curses": fake_curses}),
+        ):
+            install_options = manage_agents.prompt_install_options_tui()
+
+        self.assertEqual([request.target for request in install_options.providers], ["opencode", "claude"])
+        self.assertIsNotNone(install_options.providers[0].model_selection)
+        assert install_options.providers[0].model_selection is not None
+        self.assertEqual(install_options.providers[0].model_selection.mode, "advanced")
+        self.assertIsNone(install_options.providers[1].model_selection)
+
+    def test_prompt_install_options_tui_first_scope_back_keeps_selected_providers(self) -> None:
+        keys = [
+            FakeCursesModule.KEY_DOWN,
+            ord(" "),
+            10,
+            FakeCursesModule.KEY_LEFT,
+            10,
+            10,
+            10,
+            10,
+            10,
+            10,
+            10,
+            10,
+            10,
+        ]
+        fake_curses = FakeCursesModule(screen=FakeCursesScreen(keys))
+
+        with (
+            self.patched_detected_interactive_providers("opencode", "claude", "codex"),
+            mock.patch.dict(sys.modules, {"curses": fake_curses}),
+        ):
+            install_options = manage_agents.prompt_install_options_tui()
+
+        self.assertEqual([request.target for request in install_options.providers], ["opencode", "claude"])
+        self.assertEqual(install_options.providers[0].scope, "user")
+        self.assertEqual(install_options.providers[1].scope, "user")
+        self.assertFalse(install_options.providers[1].activate_default)
+        self.assertFalse(install_options.providers[1].enable_teams)
+
+    def test_prompt_install_options_tui_back_from_advanced_role_can_switch_to_recommended(self) -> None:
+        keys = [
+            10,
+            10,
+            10,
+            FakeCursesModule.KEY_DOWN,
+            10,
+            FakeCursesModule.KEY_LEFT,
+            FakeCursesModule.KEY_UP,
+            10,
+            10,
+        ]
+        fake_curses = FakeCursesModule(screen=FakeCursesScreen(keys))
+
+        with (
+            self.patched_detected_interactive_providers("opencode"),
+            mock.patch.dict(sys.modules, {"curses": fake_curses}),
+        ):
+            install_options = manage_agents.prompt_install_options_tui()
+
+        self.assertEqual([request.target for request in install_options.providers], ["opencode"])
+        self.assertIsNone(install_options.providers[0].model_selection)
+
+    def test_prompt_install_options_tui_summary_back_returns_to_last_step_and_keeps_state(self) -> None:
+        keys = [
+            10,
+            10,
+            10,
+            10,
+            FakeCursesModule.KEY_LEFT,
+            FakeCursesModule.KEY_DOWN,
+            10,
+            *([10] * len(agent_bundle.load_bundle())),
+            10,
+        ]
+        fake_curses = FakeCursesModule(screen=FakeCursesScreen(keys))
+        rendered_screens: list[tuple[str, list[str], str]] = []
+
+        def record_screen(*_args, **kwargs):
+            rendered_screens.append((kwargs["title"], list(kwargs["lines"]), kwargs["footer"]))
+            return (len(kwargs["lines"]), 20)
+
+        with (
+            self.patched_detected_interactive_providers("opencode"),
+            mock.patch.dict(sys.modules, {"curses": fake_curses}),
+            mock.patch.object(manage_agents, "tui_render_screen", side_effect=record_screen),
+        ):
+            install_options = manage_agents.prompt_install_options_tui()
+
+        self.assertEqual([request.target for request in install_options.providers], ["opencode"])
+        self.assertEqual(install_options.providers[0].scope, "user")
+        self.assertTrue(install_options.providers[0].activate_default)
+        self.assertIsNotNone(install_options.providers[0].model_selection)
+        assert install_options.providers[0].model_selection is not None
+        self.assertEqual(install_options.providers[0].model_selection.mode, "advanced")
+
+        summary_titles = [title for title, _lines, _footer in rendered_screens if title == "Install summary"]
+        self.assertGreaterEqual(len(summary_titles), 2)
+        summary_footers = [footer for title, _lines, footer in rendered_screens if title == "Install summary"]
+        self.assertIn("Enter: Start install | Left Arrow: Back", summary_footers)
+
+    def test_prompt_install_options_tui_does_not_preload_advanced_defaults_for_recommended_only_provider(self) -> None:
+        fake_provider = SimpleNamespace(
+            label="Fake Provider",
+            supported_scopes=("user",),
+            default_activation_default=None,
+            supported_model_selection_modes=lambda: ("recommended",),
+            default_advanced_role_model_option=mock.Mock(side_effect=AssertionError("advanced defaults should be lazy")),
+        )
+        fake_choices = (manage_agents.Choice(value="fake", label="Fake Provider"),)
+        fake_bundle = (SimpleNamespace(identifier="480-architect", display_name="480 Architect"),)
+        fake_curses = FakeCursesModule(screen=FakeCursesScreen([10, 10, 10, 10]))
+
+        with (
+            mock.patch.dict(sys.modules, {"curses": fake_curses}),
+            mock.patch.object(manage_agents, "required_interactive_provider_choices", return_value=fake_choices),
+            mock.patch.object(manage_agents, "interactive_default_target", return_value="fake"),
+            mock.patch.object(manage_agents, "get_provider", return_value=fake_provider),
+            mock.patch.object(manage_agents, "load_bundle", return_value=fake_bundle),
+            mock.patch.object(
+                manage_agents,
+                "model_selection_schema_for_target",
+                return_value=SimpleNamespace(supported_modes=("recommended",)),
+            ),
+        ):
+            install_options = manage_agents.prompt_install_options_tui()
+
+        self.assertEqual([request.target for request in install_options.providers], ["fake"])
+        self.assertIsNone(install_options.providers[0].model_selection)
+        fake_provider.default_advanced_role_model_option.assert_not_called()
 
     def test_detected_provider_choices_filters_by_cli_binary_and_keeps_config_dir_as_note(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -4291,6 +4517,9 @@ manage_agents.install(target="codex", scope="user")
             "Resolve workspace context from the Task Brief path and any explicit absolute repository or worktree path first.",
             (provider_agents_source_dir("claude") / "480-developer.md").read_text(encoding="utf-8"),
         )
+        self.assert_codex_developer_review_parse_contract(
+            (REPO_ROOT / "providers" / "codex" / "instructions" / "480-developer.md").read_text(encoding="utf-8")
+        )
 
         codex_developer = tomllib.loads((provider_agents_source_dir("codex") / "480-developer.toml").read_text(encoding="utf-8"))
         self.assert_codex_lifecycle_contract(
@@ -4298,6 +4527,7 @@ manage_agents.install(target="codex", scope="user")
             lifecycle_line="Let Codex manage reviewer/scanner child thread lifecycle unless a platform contract explicitly requires otherwise.",
         )
         self.assert_developer_role_identity_contract(codex_developer["developer_instructions"], codex_style=True)
+        self.assert_codex_developer_review_parse_contract(codex_developer["developer_instructions"])
         self.assertIn(
             "return only a structured blocker report to the current parent session or thread with `status`, `blocker_type`, `stage`, `reason`, `attempts`, and `evidence`.",
             codex_developer["developer_instructions"],
@@ -4381,11 +4611,11 @@ manage_agents.install(target="codex", scope="user")
             agents_index,
         )
         self.assertIn(
-            "- `480-code-reviewer`\n  - maps from: `480-code-reviewer`\n  - file: `providers/codex/agents/480-code-reviewer.toml`\n  - model: `gpt-5.4`\n  - reasoning: `medium`",
+            "- `480-code-reviewer`\n  - maps from: `480-code-reviewer`\n  - file: `providers/codex/agents/480-code-reviewer.toml`\n  - model: `gpt-5.4`\n  - reasoning: `high`",
             agents_index,
         )
         self.assertIn(
-            "- `480-code-reviewer2`\n  - maps from: `480-code-reviewer2`\n  - file: `providers/codex/agents/480-code-reviewer2.toml`\n  - model: `gpt-5.4-mini`\n  - reasoning: `high`",
+            "- `480-code-reviewer2`\n  - maps from: `480-code-reviewer2`\n  - file: `providers/codex/agents/480-code-reviewer2.toml`\n  - model: `gpt-5.2`\n  - reasoning: `medium`",
             agents_index,
         )
         self.assertIn(
@@ -4763,12 +4993,45 @@ manage_agents.install(target="codex", scope="user")
         self.assertIn("model: claude-sonnet-4-6", claude_reviewer2)
         self.assertIn("effort: low", claude_reviewer2)
 
+        opencode_reviewer2 = render_agents.render_opencode_agent(specs["480-code-reviewer2"])
+        self.assertIn("model: google/gemini-3-flash-preview", opencode_reviewer2)
+        self.assertIn("reasoningEffort: high", opencode_reviewer2)
+
         codex_name_map = render_agents._codex_name_map(tuple(specs.values()))
         codex_reviewer2 = tomllib.loads(
             render_agents.render_codex_agent(specs["480-code-reviewer2"], codex_name_map)
         )
-        self.assertEqual(codex_reviewer2["model"], "gpt-5.4-mini")
-        self.assertEqual(codex_reviewer2["model_reasoning_effort"], "high")
+        self.assertEqual(codex_reviewer2["model"], "gpt-5.2")
+        self.assertEqual(codex_reviewer2["model_reasoning_effort"], "medium")
+
+    def test_codex_reviewer_contract_and_model_alignment_are_pinned_in_sources_and_rendered_outputs(self) -> None:
+        specs = {spec.identifier: spec for spec in agent_bundle.load_bundle()}
+        codex_name_map = render_agents._codex_name_map(tuple(specs.values()))
+
+        for agent_id, expected_model, expected_effort in (
+            ("480-code-reviewer", "gpt-5.4", "high"),
+            ("480-code-reviewer2", "gpt-5.2", "medium"),
+        ):
+            source_instruction = (
+                REPO_ROOT / "providers" / "codex" / "instructions" / f"{agent_id}.md"
+            ).read_text(encoding="utf-8")
+            self.assert_codex_reviewer_feedback_contract(source_instruction)
+
+            checked_in_toml = (
+                provider_agents_source_dir("codex") / f"{agent_id}.toml"
+            ).read_text(encoding="utf-8")
+            checked_in_agent = tomllib.loads(checked_in_toml)
+            self.assertEqual(checked_in_agent["model"], expected_model)
+            self.assertEqual(checked_in_agent["model_reasoning_effort"], expected_effort)
+            self.assert_codex_reviewer_feedback_contract(checked_in_agent["developer_instructions"])
+
+            rendered_agent = tomllib.loads(
+                render_agents.render_codex_agent(specs[agent_id], codex_name_map)
+            )
+            self.assertEqual(rendered_agent["model"], expected_model)
+            self.assertEqual(rendered_agent["model_reasoning_effort"], expected_effort)
+            self.assertEqual(rendered_agent["developer_instructions"], checked_in_agent["developer_instructions"])
+            self.assert_codex_reviewer_feedback_contract(rendered_agent["developer_instructions"])
 
     def test_check_outputs_reports_missing_and_extra_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
