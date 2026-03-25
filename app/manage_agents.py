@@ -56,6 +56,7 @@ DEFAULT_VERIFY_SCOPE = "user"
 INSTALL_TARGET_ENV = "BOOTSTRAP_TARGET"
 INSTALL_SCOPE_ENV = "BOOTSTRAP_SCOPE"
 INSTALL_ACTIVATE_DEFAULT_ENV = "BOOTSTRAP_ACTIVATE_DEFAULT"
+INSTALL_DESKTOP_NOTIFY_ENV = "BOOTSTRAP_DESKTOP_NOTIFY"
 INSTALL_MODEL_MODE_ENV = "BOOTSTRAP_MODEL_MODE"
 INSTALL_ROLE_MODEL_CHOICES_ENV = "BOOTSTRAP_ROLE_MODEL_CHOICES"
 DEFAULT_MODEL_SELECTION_MODE = "recommended"
@@ -86,6 +87,7 @@ class ProviderInstallRequest:
     scope: str
     activate_default: bool | None
     enable_teams: bool | None = None
+    desktop_notifications: bool | None = None
     model_selection: ProviderModelSelection | None = None
 
 
@@ -217,6 +219,11 @@ def model_mode_choices_for_target(target: str) -> tuple[Choice, ...]:
 def teams_flag_default_for_target(target: str) -> bool | None:
     if target != "claude":
         return None
+    return False
+
+
+def desktop_notifications_default_for_target(target: str) -> bool | None:
+    _ = target
     return False
 
 
@@ -670,6 +677,9 @@ def build_install_summary_lines(requests: tuple[ProviderInstallRequest, ...]) ->
         if request.enable_teams is not None:
             teams_enabled = "yes" if request.enable_teams else "no"
             lines.append(f"  agent teams: {teams_enabled}")
+        if request.desktop_notifications is not None:
+            desktop_notifications = "yes" if request.desktop_notifications else "no"
+            lines.append(f"  desktop notifications: {desktop_notifications}")
         model_mode = request.model_selection.mode if request.model_selection is not None else "recommended"
         lines.append(f"  model mode: {model_mode}")
         if request.model_selection is not None and request.model_selection.mode == "advanced":
@@ -717,6 +727,7 @@ def prompt_install_options_tui() -> InstallOptions:
                     "scope": DEFAULT_SCOPE,
                     "activate_default": default_activation_for_target(target),
                     "enable_teams": teams_flag_default_for_target(target),
+                    "desktop_notifications": desktop_notifications_default_for_target(target),
                     "model_mode": (
                         "advanced"
                         if DEFAULT_MODEL_SELECTION_MODE not in provider.supported_model_selection_modes()
@@ -734,6 +745,8 @@ def prompt_install_options_tui() -> InstallOptions:
                 steps.append("activate_default")
             if state["enable_teams"] is not None:
                 steps.append("enable_teams")
+            if state["desktop_notifications"] is not None:
+                steps.append("desktop_notifications")
             steps.append("model_mode")
             if state["model_mode"] == "advanced":
                 steps.extend(f"role:{spec.identifier}" for spec in role_specs)
@@ -807,6 +820,21 @@ def prompt_install_options_tui() -> InstallOptions:
                         step_index -= 1
                         continue
                     state["enable_teams"] = selection == "yes"
+                elif current_step == "desktop_notifications":
+                    selection = tui_prompt_single_choice(
+                        screen,
+                        title=f"Install desktop notifications for {provider.label}?",
+                        choices=(
+                            Choice(value="yes", label="Yes", note="Show desktop alerts when work completes"),
+                            Choice(value="no", label="No", note="Skip notification setup"),
+                        ),
+                        default_value="yes" if state["desktop_notifications"] else "no",
+                        allow_back=True,
+                    )
+                    if selection is TUI_NAVIGATE_BACK:
+                        step_index -= 1
+                        continue
+                    state["desktop_notifications"] = selection == "yes"
                 elif current_step == "model_mode":
                     selection = tui_prompt_single_choice(
                         screen,
@@ -865,6 +893,7 @@ def prompt_install_options_tui() -> InstallOptions:
                         scope=state["scope"],
                         activate_default=state["activate_default"],
                         enable_teams=state["enable_teams"],
+                        desktop_notifications=state["desktop_notifications"],
                         model_selection=model_selection,
                     )
                 )
@@ -934,6 +963,15 @@ def prompt_install_options_basic(
             default=enable_teams,
         )
 
+    desktop_notifications = desktop_notifications_default_for_target(target)
+    if desktop_notifications is not None:
+        desktop_notifications = prompt_bool_choice(
+            output=output,
+            input_stream=input_stream,
+            title="Install desktop notifications now?",
+            default=desktop_notifications,
+        )
+
     model_mode = prompt_choice(
         output=output,
         input_stream=input_stream,
@@ -949,6 +987,7 @@ def prompt_install_options_basic(
                     scope=scope,
                     activate_default=activate_default,
                     enable_teams=enable_teams,
+                    desktop_notifications=desktop_notifications,
                 ),
             )
         )
@@ -977,6 +1016,7 @@ def prompt_install_options_basic(
                 scope=scope,
                 activate_default=activate_default,
                 enable_teams=enable_teams,
+                desktop_notifications=desktop_notifications,
                 model_selection=advanced_model_selection_for_target(target, role_options),
             ),
         )
@@ -996,6 +1036,7 @@ def should_prompt_install(
             args.target,
             args.scope,
             args.activate_default,
+            args.desktop_notifications,
             args.model_mode,
             args.role_model_choice,
         )
@@ -1006,6 +1047,7 @@ def should_prompt_install(
             INSTALL_TARGET_ENV,
             INSTALL_SCOPE_ENV,
             INSTALL_ACTIVATE_DEFAULT_ENV,
+            INSTALL_DESKTOP_NOTIFY_ENV,
             INSTALL_MODEL_MODE_ENV,
             INSTALL_ROLE_MODEL_CHOICES_ENV,
         )
@@ -1030,6 +1072,13 @@ def resolve_install_options_from_inputs(
             env_name=INSTALL_ACTIVATE_DEFAULT_ENV,
         )
 
+    desktop_notifications = args.desktop_notifications
+    if desktop_notifications is None and INSTALL_DESKTOP_NOTIFY_ENV in env:
+        desktop_notifications = parse_optional_bool(
+            env[INSTALL_DESKTOP_NOTIFY_ENV],
+            env_name=INSTALL_DESKTOP_NOTIFY_ENV,
+        )
+
     model_mode = args.model_mode or env.get(INSTALL_MODEL_MODE_ENV)
     if model_mode is not None and model_mode not in model_selection_schema_for_target(target).supported_modes:
         raise SystemExit(f"Unsupported model selection mode for {target}: {model_mode}")
@@ -1049,6 +1098,7 @@ def resolve_install_options_from_inputs(
                     target=target,
                     scope=scope,
                     activate_default=activate_default,
+                    desktop_notifications=desktop_notifications,
                     model_selection=(
                         load_persisted_model_selection(resolve_target(target, scope))
                         if install_reuses_existing_model_selection(args=args, env=env)
@@ -1064,14 +1114,15 @@ def resolve_install_options_from_inputs(
     parsed_choices = parse_role_model_choice_entries(raw_role_model_choices or [], target=target)
     return InstallOptions(
         providers=(
-            ProviderInstallRequest(
-                target=target,
-                scope=scope,
-                activate_default=activate_default,
-                model_selection=advanced_model_selection_for_target(target, parsed_choices),
-            ),
+                ProviderInstallRequest(
+                    target=target,
+                    scope=scope,
+                    activate_default=activate_default,
+                    desktop_notifications=desktop_notifications,
+                    model_selection=advanced_model_selection_for_target(target, parsed_choices),
+                ),
+            )
         )
-    )
 
 
 def resolve_uninstall_options_from_inputs(
@@ -1117,6 +1168,8 @@ def run_install_requests(requests: tuple[ProviderInstallRequest, ...]) -> None:
         }
         if request.enable_teams is not None:
             install_kwargs["enable_teams"] = request.enable_teams
+        if request.desktop_notifications is not None:
+            install_kwargs["desktop_notifications"] = request.desktop_notifications
         if request.model_selection is not None:
             install_kwargs["model_selection"] = request.model_selection
         install(**install_kwargs)
@@ -1404,6 +1457,7 @@ def install(
     force: bool = False,
     activate_default: bool | None = None,
     enable_teams: bool | None = None,
+    desktop_notifications: bool | None = None,
     model_selection: ProviderModelSelection | None = None,
 ) -> None:
     resolved_target = resolve_target(target, scope)
@@ -1423,6 +1477,7 @@ def install(
             manage_default_activation=should_activate_default,
             state_updates={"model_selection": None},
             enable_claude_teams=bool(enable_teams),
+            enable_desktop_notifications=desktop_notifications,
             codex_managed_guidance=codex_managed_guidance,
         )
         return
@@ -1441,6 +1496,7 @@ def install(
             manage_default_activation=should_activate_default,
             state_updates={"model_selection": serialize_model_selection(model_selection)},
             enable_claude_teams=bool(enable_teams),
+            enable_desktop_notifications=desktop_notifications,
             codex_managed_guidance=codex_managed_guidance,
         )
 
@@ -1477,9 +1533,13 @@ def build_parser() -> argparse.ArgumentParser:
     activation_group = parser.add_mutually_exclusive_group()
     activation_group.add_argument("--activate-default", dest="activate_default", action="store_true")
     activation_group.add_argument("--no-activate-default", dest="activate_default", action="store_false")
+    desktop_notify_group = parser.add_mutually_exclusive_group()
+    desktop_notify_group.add_argument("--desktop-notify", dest="desktop_notifications", action="store_true")
+    desktop_notify_group.add_argument("--no-desktop-notify", dest="desktop_notifications", action="store_false")
     parser.add_argument("--model-mode", choices=("recommended", "advanced"))
     parser.add_argument("--role-model-choice", action="append")
     parser.set_defaults(activate_default=None)
+    parser.set_defaults(desktop_notifications=None)
     return parser
 
 

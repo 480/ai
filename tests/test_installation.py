@@ -155,6 +155,7 @@ class InstallationTests(unittest.TestCase):
         provider_label: str,
         scope: str,
         activate_default: bool | None,
+        desktop_notifications: bool | None = None,
         model_mode: str,
     ) -> None:
         provider_block = self.summary_provider_block(summary_lines, provider_label)
@@ -165,6 +166,10 @@ class InstallationTests(unittest.TestCase):
             self.assertIn(f"default activation: {'yes' if activate_default else 'no'}", summary)
         else:
             self.assertNotIn("default activation:", summary)
+        if desktop_notifications is not None:
+            self.assertIn(f"desktop notifications: {'yes' if desktop_notifications else 'no'}", summary)
+        else:
+            self.assertNotIn("desktop notifications:", summary)
         self.assertIn(f"model mode: {model_mode}", summary)
 
     def summary_provider_block(self, summary_lines: list[str], provider_label: str) -> list[str]:
@@ -1107,6 +1112,182 @@ manage_agents.install(target="codex", scope="user")
 
             self.assertEqual(self.read_json(config_path), {"agent": "team-agent", "theme": "dark"})
 
+    def test_claude_user_install_with_desktop_notifications_manages_hook_and_restores_config(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            config_path = home / ".claude" / "settings.json"
+            hook_path = home / ".claude" / ".480ai" / "desktop-notify-hook.py"
+            self.write_json(config_path, {"agent": "keep-me", "hooks": {"Stop": []}})
+
+            with self.patched_manage_agents_home(home):
+                manage_agents.install(
+                    target="claude",
+                    scope="user",
+                    activate_default=False,
+                    enable_teams=False,
+                    desktop_notifications=True,
+                )
+
+                config = self.read_json(config_path)
+                self.assertEqual(config["agent"], "keep-me")
+                self.assertEqual(config["hooks"]["Stop"], [])
+                self.assertEqual(
+                    config["hooks"]["Notification"],
+                    [
+                        {
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": f"{hook_path} claude",
+                                }
+                            ]
+                        }
+                    ],
+                )
+                self.assertTrue(hook_path.exists())
+
+                manage_agents.uninstall(target="claude", scope="user")
+
+            self.assertEqual(self.read_json(config_path), {"agent": "keep-me", "hooks": {"Stop": []}})
+            self.assertFalse(hook_path.exists())
+
+    def test_claude_user_install_with_existing_notification_hook_preserves_user_config(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            config_path = home / ".claude" / "settings.json"
+            hook_path = home / ".claude" / ".480ai" / "desktop-notify-hook.py"
+            existing_hook = {
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": f"{hook_path} claude",
+                    }
+                ]
+            }
+            self.write_json(
+                config_path,
+                {
+                    "agent": "keep-me",
+                    "hooks": {
+                        "Stop": [],
+                        "Notification": [existing_hook],
+                    },
+                },
+            )
+
+            with self.patched_manage_agents_home(home):
+                manage_agents.install(
+                    target="claude",
+                    scope="user",
+                    activate_default=False,
+                    enable_teams=False,
+                    desktop_notifications=True,
+                )
+
+                self.assertEqual(
+                    self.read_json(config_path),
+                    {
+                        "agent": "keep-me",
+                        "hooks": {
+                            "Stop": [],
+                            "Notification": [existing_hook],
+                        },
+                    },
+                )
+                self.assertTrue(hook_path.exists())
+
+                manage_agents.uninstall(target="claude", scope="user")
+
+            self.assertEqual(
+                self.read_json(config_path),
+                {
+                    "agent": "keep-me",
+                    "hooks": {
+                        "Stop": [],
+                        "Notification": [existing_hook],
+                    },
+                },
+            )
+            self.assertFalse(hook_path.exists())
+
+    def test_claude_existing_state_without_notification_metadata_backfills_and_restores(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            config_path = home / ".claude" / "settings.json"
+            state_path = home / ".claude" / ".480ai-bootstrap" / "state.json"
+            hook_path = home / ".claude" / ".480ai" / "desktop-notify-hook.py"
+            self.write_json(config_path, {"agent": "keep-me", "hooks": {"Stop": []}})
+
+            with self.patched_manage_agents_home(home):
+                manage_agents.install(
+                    target="claude",
+                    scope="user",
+                    activate_default=False,
+                    enable_teams=False,
+                    desktop_notifications=False,
+                )
+
+                state = self.read_json(state_path)
+                managed_config = state.get("managed_config")
+                assert isinstance(managed_config, dict)
+                managed_config.pop("claude_notification", None)
+                self.write_json(state_path, state)
+
+                manage_agents.install(
+                    target="claude",
+                    scope="user",
+                    activate_default=False,
+                    enable_teams=False,
+                    desktop_notifications=True,
+                )
+
+                self.assertTrue(hook_path.exists())
+                manage_agents.uninstall(target="claude", scope="user")
+
+            self.assertEqual(self.read_json(config_path), {"agent": "keep-me", "hooks": {"Stop": []}})
+            self.assertFalse(hook_path.exists())
+
+    def test_claude_reinstall_with_explicit_notification_opt_out_removes_managed_hook(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            config_path = home / ".claude" / "settings.json"
+            hook_path = home / ".claude" / ".480ai" / "desktop-notify-hook.py"
+            self.write_json(config_path, {"agent": "keep-me", "hooks": {"Stop": []}})
+
+            with self.patched_manage_agents_home(home):
+                manage_agents.install(
+                    target="claude",
+                    scope="user",
+                    activate_default=False,
+                    enable_teams=False,
+                    desktop_notifications=True,
+                )
+
+                self.assertEqual(
+                    self.read_json(config_path)["hooks"]["Notification"],
+                    [
+                        {
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": f"{hook_path} claude",
+                                }
+                            ]
+                        }
+                    ],
+                )
+
+                manage_agents.install(
+                    target="claude",
+                    scope="user",
+                    activate_default=False,
+                    enable_teams=False,
+                    desktop_notifications=False,
+                )
+
+            self.assertEqual(self.read_json(config_path), {"agent": "keep-me", "hooks": {"Stop": []}})
+            self.assertFalse(hook_path.exists())
+
     def test_claude_reinstall_without_activate_default_preserves_previous_restore_state(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp)
@@ -1735,6 +1916,129 @@ manage_agents.install(target="codex", scope="user")
             self.assertTrue(merged["features"]["multi_agent"])
             self.assertEqual(merged["agents"]["max_threads"], 100)
             self.assertEqual(merged["agents"]["max_depth"], 2)
+
+    def test_codex_user_install_with_desktop_notifications_restores_previous_notify_setting(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            config_path = home / ".codex" / "config.toml"
+            hook_path = home / ".codex" / ".480ai" / "desktop-notify-hook.py"
+            config_path.parent.mkdir(parents=True, exist_ok=True)
+            config_path.write_text(
+                'notify = ["/Users/example/original-notify", "codex"]\n',
+                encoding="utf-8",
+            )
+
+            with self.patched_manage_agents_home(home):
+                manage_agents.install(
+                    target="codex",
+                    scope="user",
+                    activate_default=False,
+                    desktop_notifications=True,
+                )
+
+                installed = tomllib.loads(config_path.read_text(encoding="utf-8"))
+                self.assertEqual(installed["notify"], [str(hook_path), "codex"])
+                self.assertTrue(hook_path.exists())
+
+                manage_agents.uninstall(target="codex", scope="user")
+
+            restored = tomllib.loads(config_path.read_text(encoding="utf-8"))
+            self.assertEqual(restored["notify"], ["/Users/example/original-notify", "codex"])
+            self.assertFalse(hook_path.exists())
+
+    def test_codex_reinstall_with_explicit_notification_opt_out_removes_managed_notify(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            config_path = home / ".codex" / "config.toml"
+            hook_path = home / ".codex" / ".480ai" / "desktop-notify-hook.py"
+            config_path.parent.mkdir(parents=True, exist_ok=True)
+            config_path.write_text(
+                'notify = ["/Users/example/original-notify", "codex"]\n',
+                encoding="utf-8",
+            )
+
+            with self.patched_manage_agents_home(home):
+                manage_agents.install(
+                    target="codex",
+                    scope="user",
+                    activate_default=False,
+                    desktop_notifications=True,
+                )
+
+                installed = tomllib.loads(config_path.read_text(encoding="utf-8"))
+                self.assertEqual(installed["notify"], [str(hook_path), "codex"])
+                self.assertTrue(hook_path.exists())
+
+                manage_agents.install(
+                    target="codex",
+                    scope="user",
+                    activate_default=False,
+                    desktop_notifications=False,
+                )
+
+            restored = tomllib.loads(config_path.read_text(encoding="utf-8"))
+            self.assertEqual(restored["notify"], ["/Users/example/original-notify", "codex"])
+            self.assertFalse(hook_path.exists())
+
+    def test_opencode_user_install_with_desktop_notifications_manages_plugin_and_restores_config(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            config_path = home / ".config" / "opencode" / "opencode.json"
+            hook_path = home / ".config" / "opencode" / ".480ai" / "desktop-notify-hook.py"
+            plugin_path = home / ".config" / "opencode" / "plugins" / "480ai-desktop-notify.js"
+            self.write_json(config_path, {"theme": "dark", "default_agent": "480-architect"})
+
+            with self.patched_manage_agents_home(home):
+                manage_agents.install(
+                    target="opencode",
+                    scope="user",
+                    activate_default=True,
+                    desktop_notifications=True,
+                )
+
+                installed = self.read_json(config_path)
+                self.assertEqual(installed["default_agent"], "480-architect")
+                self.assertTrue(hook_path.exists())
+                self.assertTrue(plugin_path.exists())
+                self.assertIn(str(hook_path), plugin_path.read_text(encoding="utf-8"))
+
+                manage_agents.uninstall(target="opencode", scope="user")
+
+            restored = self.read_json(config_path)
+            self.assertEqual(restored, {"theme": "dark", "default_agent": "480-architect"})
+            self.assertFalse(hook_path.exists())
+            self.assertFalse(plugin_path.exists())
+
+    def test_opencode_reinstall_with_explicit_notification_opt_out_removes_managed_plugin(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            config_path = home / ".config" / "opencode" / "opencode.json"
+            hook_path = home / ".config" / "opencode" / ".480ai" / "desktop-notify-hook.py"
+            plugin_path = home / ".config" / "opencode" / "plugins" / "480ai-desktop-notify.js"
+            self.write_json(config_path, {"theme": "dark", "default_agent": "480-architect"})
+
+            with self.patched_manage_agents_home(home):
+                manage_agents.install(
+                    target="opencode",
+                    scope="user",
+                    activate_default=True,
+                    desktop_notifications=True,
+                )
+
+                self.assertTrue(hook_path.exists())
+                self.assertTrue(plugin_path.exists())
+
+                manage_agents.install(
+                    target="opencode",
+                    scope="user",
+                    activate_default=True,
+                    desktop_notifications=False,
+                )
+
+            restored = self.read_json(config_path)
+            self.assertEqual(restored, {"theme": "dark", "default_agent": "480-architect"})
+            self.assertFalse(hook_path.exists())
+            self.assertFalse(plugin_path.exists())
 
     def test_codex_user_install_updates_existing_dotted_subagent_settings_in_place(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -2459,7 +2763,7 @@ manage_agents.install(target="codex", scope="user")
         self.assertIn("Agent outputs are up to date.", check_result.stdout)
 
     def test_install_main_interactively_uses_claude_default_activation_no(self) -> None:
-        stdin = TTYStringIO("2\n\n\n\n\n")
+        stdin = TTYStringIO("2\n\n\n\n\n\n")
         stdout = TTYStringIO()
 
         with (
@@ -2477,6 +2781,7 @@ manage_agents.install(target="codex", scope="user")
             scope="user",
             activate_default=False,
             enable_teams=False,
+            desktop_notifications=False,
         )
 
     def test_supports_install_tui_rejects_missing_terminal_capabilities(self) -> None:
@@ -2597,7 +2902,7 @@ manage_agents.install(target="codex", scope="user")
         )
 
     def test_prompt_install_options_blocks_unsupported_opencode_project_and_allows_opt_out(self) -> None:
-        stdin = TTYStringIO("1\n2\n\n2\n\n")
+        stdin = TTYStringIO("1\n2\n\n2\n\n\n")
         stdout = TTYStringIO()
 
         with self.patched_detected_interactive_providers("opencode", "claude", "codex"):
@@ -2619,7 +2924,7 @@ manage_agents.install(target="codex", scope="user")
         self.assertIn("Choose the model mode.", output)
 
     def test_prompt_install_options_hides_activation_for_codex(self) -> None:
-        stdin = TTYStringIO("3\n2\n\n")
+        stdin = TTYStringIO("3\n2\n\n\n")
         stdout = TTYStringIO()
 
         with self.patched_detected_interactive_providers("opencode", "claude", "codex"):
@@ -2635,7 +2940,7 @@ manage_agents.install(target="codex", scope="user")
         self.assertNotIn("agent teams experimental flag", stdout.getvalue())
 
     def test_prompt_install_options_shows_teams_prompt_only_for_claude(self) -> None:
-        stdin = TTYStringIO("2\n\n\n\n\n")
+        stdin = TTYStringIO("2\n\n\n\n\n\n")
         stdout = TTYStringIO()
 
         with self.patched_detected_interactive_providers("opencode", "claude", "codex"):
@@ -2650,7 +2955,7 @@ manage_agents.install(target="codex", scope="user")
         self.assert_claude_teams_prompt_shown(stdout.getvalue())
 
     def test_prompt_install_options_collects_advanced_role_model_choices(self) -> None:
-        stdin = TTYStringIO("2\n\n\n\n2\n2\n\n\n\n\n")
+        stdin = TTYStringIO("2\n\n\n\n\n2\n2\n\n\n\n\n")
         stdout = TTYStringIO()
 
         with self.patched_detected_interactive_providers("opencode", "claude", "codex"):
@@ -2717,7 +3022,7 @@ manage_agents.install(target="codex", scope="user")
         self.assertIsNone(rendered_errors[-1])
 
     def test_prompt_install_options_tui_asks_each_provider_in_order_and_renders_summary(self) -> None:
-        keys = [10] * 12
+        keys = [10] * 16
         fake_curses = FakeCursesModule(screen=FakeCursesScreen(keys))
         rendered_screens: list[tuple[str, list[str], str]] = []
 
@@ -2758,8 +3063,30 @@ manage_agents.install(target="codex", scope="user")
             10,
             10,
             10,
+            10,
             FakeCursesModule.KEY_LEFT,
             FakeCursesModule.KEY_DOWN,
+            10,
+            10,
+            10,
+            10,
+            10,
+            10,
+            10,
+            10,
+            10,
+            10,
+            10,
+            10,
+            10,
+            10,
+            10,
+            10,
+            10,
+            10,
+            10,
+            10,
+            10,
             10,
             10,
             10,
@@ -2802,7 +3129,7 @@ manage_agents.install(target="codex", scope="user")
             10,
             10,
             10,
-        ]
+        ] + [10] * 40
         fake_curses = FakeCursesModule(screen=FakeCursesScreen(keys))
 
         with (
@@ -2819,6 +3146,7 @@ manage_agents.install(target="codex", scope="user")
 
     def test_prompt_install_options_tui_back_from_advanced_role_can_switch_to_recommended(self) -> None:
         keys = [
+            10,
             10,
             10,
             10,
@@ -2842,6 +3170,7 @@ manage_agents.install(target="codex", scope="user")
 
     def test_prompt_install_options_tui_summary_back_returns_to_last_step_and_keeps_state(self) -> None:
         keys = [
+            10,
             10,
             10,
             10,
@@ -2888,7 +3217,7 @@ manage_agents.install(target="codex", scope="user")
         )
         fake_choices = (manage_agents.Choice(value="fake", label="Fake Provider"),)
         fake_bundle = (SimpleNamespace(identifier="480-architect", display_name="480 Architect"),)
-        fake_curses = FakeCursesModule(screen=FakeCursesScreen([10, 10, 10, 10]))
+        fake_curses = FakeCursesModule(screen=FakeCursesScreen([10, 10, 10, 10, 10, 10]))
 
         with (
             mock.patch.dict(sys.modules, {"curses": fake_curses}),
@@ -2928,7 +3257,7 @@ manage_agents.install(target="codex", scope="user")
         self.assertEqual(choices[1].note, "")
 
     def test_prompt_install_options_only_shows_detected_providers_in_basic_mode(self) -> None:
-        stdin = TTYStringIO("1\n\n\n\n\n")
+        stdin = TTYStringIO("1\n\n\n\n\n\n")
         stdout = TTYStringIO()
         detected_choices = (
             manage_agents.Choice(value="claude", label="Claude Code"),
@@ -2983,11 +3312,13 @@ manage_agents.install(target="codex", scope="user")
                     target="opencode",
                     scope="user",
                     activate_default=True,
+                    desktop_notifications=True,
                 ),
                 manage_agents.ProviderInstallRequest(
                     target="codex",
                     scope="project",
                     activate_default=None,
+                    desktop_notifications=False,
                     model_selection=self.advanced_selection("codex", **{"480-architect": "spark-high"}),
                 ),
                 manage_agents.ProviderInstallRequest(
@@ -2995,6 +3326,7 @@ manage_agents.install(target="codex", scope="user")
                     scope="user",
                     activate_default=False,
                     enable_teams=False,
+                    desktop_notifications=True,
                 ),
             )
         )
@@ -3006,6 +3338,7 @@ manage_agents.install(target="codex", scope="user")
             provider_label="OpenCode",
             scope="user",
             activate_default=True,
+            desktop_notifications=True,
             model_mode="recommended",
         )
         self.assert_summary_contains_provider(
@@ -3013,10 +3346,12 @@ manage_agents.install(target="codex", scope="user")
             provider_label="Codex CLI",
             scope="project",
             activate_default=None,
+            desktop_notifications=False,
             model_mode="advanced",
         )
         claude_block = "\n".join(self.summary_provider_block(lines, "Claude Code"))
         self.assertRegex(claude_block, r"agent teams:\s*no")
+        self.assertIn("desktop notifications: yes", claude_block)
         codex_block = "\n".join(self.summary_provider_block(lines, "Codex CLI"))
         self.assertIn("480-architect: spark-high", codex_block)
         self.assertIn("480-developer: gpt-5.4-medium", codex_block)
@@ -3086,6 +3421,7 @@ manage_agents.install(target="codex", scope="user")
                     scope="project",
                     activate_default=False,
                     enable_teams=True,
+                    desktop_notifications=True,
                     model_selection=self.advanced_selection("claude", **{"480-architect": "sonnet-max"}),
                 ),
             )
@@ -3107,6 +3443,7 @@ manage_agents.install(target="codex", scope="user")
         self.assertEqual(second_call["scope"], "project")
         self.assertEqual(second_call["activate_default"], False)
         self.assertTrue(second_call["enable_teams"])
+        self.assertTrue(second_call["desktop_notifications"])
         self.assertEqual(second_call["model_selection"].role_options["480-architect"], "sonnet-max")
 
     def test_install_main_uses_bootstrap_env_without_prompting(self) -> None:
@@ -3122,6 +3459,7 @@ manage_agents.install(target="codex", scope="user")
                     "BOOTSTRAP_TARGET": "claude",
                     "BOOTSTRAP_SCOPE": "project",
                     "BOOTSTRAP_ACTIVATE_DEFAULT": "yes",
+                    "BOOTSTRAP_DESKTOP_NOTIFY": "yes",
                 },
                 clear=True,
             ),
@@ -3136,6 +3474,7 @@ manage_agents.install(target="codex", scope="user")
             target="claude",
             scope="project",
             activate_default=True,
+            desktop_notifications=True,
         )
 
     def test_install_main_uses_advanced_model_env_without_prompting(self) -> None:

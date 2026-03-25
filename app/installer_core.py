@@ -5,6 +5,7 @@ import os
 import re
 import shutil
 import tempfile
+import shlex
 from importlib import import_module
 from pathlib import Path
 
@@ -12,6 +13,341 @@ if __package__:
     from .install_targets import InstallTarget
 else:  # pragma: no cover
     from install_targets import InstallTarget
+
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+DESKTOP_NOTIFICATION_HOOK_TEMPLATE = r'''#!/usr/bin/env python3
+
+from __future__ import annotations
+
+import json
+import pathlib
+import shutil
+import subprocess
+import sys
+
+TITLE_LIMIT = 72
+MESSAGE_LIMIT = 220
+SESSION_GLOB = "rollout-*{thread_id}.jsonl"
+
+
+def collapse_text(value: object) -> str:
+    return " ".join(str(value or "").split()).strip()
+
+
+def truncate_text(value: object, limit: int) -> str:
+    text = collapse_text(value)
+    if len(text) <= limit:
+        return text
+    return text[: limit - 1].rstrip() + "..."
+
+
+def project_name(cwd: str) -> str:
+    if not cwd:
+        return ""
+    return pathlib.Path(cwd).name
+
+
+def nested_subagent_source(value: object) -> bool:
+    if isinstance(value, dict):
+        if "subagent" in value:
+            return True
+        return any(nested_subagent_source(item) for item in value.values())
+    if isinstance(value, list):
+        return any(nested_subagent_source(item) for item in value)
+    return False
+
+
+def payload_thread_id(payload: dict) -> str:
+    for key in ("thread-id", "thread_id", "threadId", "session-id", "session_id", "sessionId"):
+        thread_id = collapse_text(payload.get(key))
+        if thread_id:
+            return thread_id
+    return ""
+
+
+def codex_session_directories() -> tuple[pathlib.Path, ...]:
+    codex_home = pathlib.Path.home() / ".codex"
+    return (codex_home / "sessions", codex_home / "archived_sessions")
+
+
+def load_session_meta(thread_id: str) -> dict | None:
+    if not thread_id:
+        return None
+
+    pattern = SESSION_GLOB.format(thread_id=thread_id)
+    for directory in codex_session_directories():
+        if not directory.exists():
+            continue
+
+        for session_path in directory.rglob(pattern):
+            try:
+                first_line = session_path.read_text(encoding="utf-8").splitlines()[0]
+                record = json.loads(first_line)
+            except (IndexError, OSError, json.JSONDecodeError):
+                continue
+
+            if record.get("type") != "session_meta":
+                continue
+
+            payload = record.get("payload") or {}
+            if collapse_text(payload.get("id")) == thread_id:
+                return payload
+
+    return None
+
+
+def codex_subagent_payload(payload: dict) -> bool:
+    source = payload.get("source")
+    if nested_subagent_source(source):
+        return True
+
+    session_meta = load_session_meta(payload_thread_id(payload))
+    if not session_meta:
+        return False
+
+    return nested_subagent_source(session_meta.get("source"))
+
+
+def codex_notification(payload: dict) -> dict | None:
+    if payload.get("type") != "agent-turn-complete":
+        return None
+    if codex_subagent_payload(payload):
+        return None
+
+    cwd = collapse_text(payload.get("cwd"))
+    title = "Codex completed"
+    project = project_name(cwd)
+    if project:
+        title += f" · {project}"
+
+    message = collapse_text(payload.get("last-assistant-message"))
+    if not message:
+        inputs = payload.get("input-messages") or []
+        if inputs:
+            message = collapse_text(inputs[-1])
+    if not message:
+        message = "Response is ready."
+
+    return {
+        "title": title,
+        "message": message,
+        "group": f"codex:{cwd or 'global'}",
+    }
+
+
+def opencode_notification(payload: dict) -> dict | None:
+    if payload.get("event") != "session.idle":
+        return None
+
+    cwd = collapse_text(payload.get("cwd"))
+    title = "OpenCode completed"
+    project = project_name(cwd)
+    if project:
+        title += f" · {project}"
+
+    message = collapse_text(payload.get("summary")) or "Response is ready."
+    return {
+        "title": title,
+        "message": message,
+        "group": f"opencode:{cwd or 'global'}",
+    }
+
+
+def claude_notification(payload: dict) -> dict | None:
+    if payload.get("hook_event_name") != "Notification":
+        return None
+
+    notification_type = collapse_text(payload.get("notification_type"))
+    title = collapse_text(payload.get("title"))
+    if not title:
+        title_map = {
+            "permission_prompt": "Permission needed",
+            "idle_prompt": "Claude Code idle",
+            "auth_success": "Authentication succeeded",
+            "elicitation_dialog": "Input required",
+        }
+        title = title_map.get(notification_type, "Claude Code notification")
+
+    message = collapse_text(payload.get("message")) or "Response is ready."
+    cwd = collapse_text(payload.get("cwd"))
+    return {
+        "title": title,
+        "message": message,
+        "group": f"claude:{cwd or 'global'}:{notification_type or 'notification'}",
+    }
+
+
+def build_notification(source: str, payload: dict) -> dict | None:
+    if source == "codex":
+        return codex_notification(payload)
+    if source == "opencode":
+        return opencode_notification(payload)
+    if source == "claude":
+        return claude_notification(payload)
+    return None
+
+
+def send_with_terminal_notifier(title: str, message: str, group: str) -> bool:
+    terminal_notifier = shutil.which("terminal-notifier")
+    if not terminal_notifier:
+        return False
+
+    completed = subprocess.run(
+        [
+            terminal_notifier,
+            "-title",
+            truncate_text(title, TITLE_LIMIT),
+            "-message",
+            truncate_text(message, MESSAGE_LIMIT),
+            "-group",
+            group,
+        ],
+        check=False,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    return completed.returncode == 0
+
+
+def send_with_osascript(title: str, message: str) -> None:
+    script = (
+        "on run argv\n"
+        "display notification (item 2 of argv) with title (item 1 of argv)\n"
+        "end run\n"
+    )
+    subprocess.run(
+        [
+            "osascript",
+            "-e",
+            script,
+            truncate_text(title, TITLE_LIMIT),
+            truncate_text(message, MESSAGE_LIMIT),
+        ],
+        check=False,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+
+def load_payload() -> tuple[str, dict] | None:
+    if len(sys.argv) < 2:
+        return None
+
+    source = collapse_text(sys.argv[1])
+    raw_payload = sys.argv[2] if len(sys.argv) >= 3 else sys.stdin.read()
+    try:
+        payload = json.loads(raw_payload)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    return source, payload
+
+
+def main() -> int:
+    loaded = load_payload()
+    if loaded is None:
+        return 0
+
+    source, payload = loaded
+    notification = build_notification(source, payload)
+    if not notification:
+        return 0
+
+    if send_with_terminal_notifier(
+        notification["title"], notification["message"], notification["group"]
+    ):
+        return 0
+
+    if shutil.which("osascript"):
+        send_with_osascript(notification["title"], notification["message"])
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+'''
+OPENCODE_DESKTOP_NOTIFICATION_PLUGIN_TEMPLATE = r'''const NOTIFY_SCRIPT = "__NOTIFY_SCRIPT__";
+
+const collapseText = (value) => String(value ?? "").replace(/\s+/g, " ").trim();
+
+const extractSummary = (parts) =>
+  collapseText(
+    parts
+      .filter((part) => part?.type === "text" && !part?.ignored)
+      .map((part) => part.text)
+      .join(" "),
+  );
+
+const latestAssistantMessage = async (client, sessionID) => {
+  const result = await client.session.messages({ sessionID });
+  if (result.error || !result.data) {
+    return null;
+  }
+
+  const messages = [...result.data].reverse();
+  for (const entry of messages) {
+    if (entry.info?.role !== "assistant") {
+      continue;
+    }
+
+    return {
+      id: entry.info.id,
+      cwd: entry.info.path?.cwd ?? "",
+      summary: extractSummary(entry.parts) || "Response is ready.",
+    };
+  }
+
+  return null;
+};
+
+export const DesktopNotifyPlugin = async ({ client, $, directory }) => {
+  const notifiedMessageIDs = new Map();
+
+  return {
+    event: async ({ event }) => {
+      if (event.type !== "session.idle") {
+        return;
+      }
+
+      try {
+        const sessionID = event.properties.sessionID;
+        const latest = await latestAssistantMessage(client, sessionID);
+        if (!latest) {
+          return;
+        }
+
+        if (notifiedMessageIDs.get(sessionID) === latest.id) {
+          return;
+        }
+
+        notifiedMessageIDs.set(sessionID, latest.id);
+
+        const payload = JSON.stringify({
+          event: event.type,
+          sessionID,
+          cwd: latest.cwd || directory || "",
+          summary: latest.summary,
+        });
+
+        await $`${NOTIFY_SCRIPT} opencode ${payload}`.quiet();
+      } catch (error) {
+        console.error(
+          "[desktop-notify-plugin]",
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+    },
+  };
+};
+'''
+
+DESKTOP_NOTIFICATION_STATE_KEY = "desktop_notifications"
+DESKTOP_NOTIFICATION_STATE_FILES_KEY = "files"
+DESKTOP_NOTIFICATION_HOOK_ARTIFACT_KEY = "hook_script"
+DESKTOP_NOTIFICATION_OPENCODE_PLUGIN_ARTIFACT_KEY = "opencode_plugin"
 
 
 def target_default_activation_state(target: InstallTarget) -> tuple[str, str] | None:
@@ -200,6 +536,12 @@ def _json_scalar(value: object) -> object:
     return str(value)
 
 
+def _json_value(value: object) -> object:
+    if value is None or isinstance(value, (bool, int, float, str, list, dict)):
+        return value
+    return str(value)
+
+
 def _managed_config_state(state: dict) -> dict[str, object] | None:
     managed_config = state.get(MANAGED_CONFIG_STATE_KEY)
     if not isinstance(managed_config, dict):
@@ -230,7 +572,7 @@ def capture_managed_config_state_on_install(target: InstallTarget, state: dict, 
             if isinstance(table, dict) and key_name in table:
                 settings[full_key] = {
                     "present": True,
-                    "value": _json_scalar(table[key_name]),
+                    "value": _json_value(table[key_name]),
                 }
             else:
                 settings[full_key] = {
@@ -238,6 +580,23 @@ def capture_managed_config_state_on_install(target: InstallTarget, state: dict, 
                     "value": None,
                 }
         managed_config["codex_required_settings"] = settings
+        notify_value = config.get("notify")
+        managed_config["codex_notify"] = {
+            "present": "notify" in config,
+            "value": _json_value(notify_value) if "notify" in config else None,
+        }
+    elif target.name == "claude":
+        hooks = config.get("hooks")
+        if isinstance(hooks, dict) and "Notification" in hooks:
+            managed_config["claude_notification"] = {
+                "present": True,
+                "value": _json_value(hooks.get("Notification")),
+            }
+        else:
+            managed_config["claude_notification"] = {
+                "present": False,
+                "value": None,
+            }
 
     state[MANAGED_CONFIG_STATE_KEY] = managed_config
 
@@ -262,6 +621,16 @@ def _render_toml_scalar(value: object) -> str:
     return json.dumps(value)
 
 
+def _render_toml_value(value: object) -> str:
+    if isinstance(value, (bool, int, float, str)):
+        return _render_toml_scalar(value)
+    if isinstance(value, list):
+        return json.dumps(value)
+    if isinstance(value, dict):
+        return json.dumps(value)
+    return _render_toml_scalar(value)
+
+
 def _nested_toml_value(data: dict, table_name: str, key_name: str) -> tuple[bool, object]:
     table = data.get(table_name)
     if not isinstance(table, dict) or key_name not in table:
@@ -278,6 +647,32 @@ def _replace_toml_key_assignment(contents: str, key_path: str, rendered_value: s
         return contents, False
     replaced = pattern.sub(rf"\g<prefix>{rendered_value}\g<suffix>", contents, count=1)
     return replaced, True
+
+
+def _merge_toml_root_key(contents: str, key_name: str, rendered_value: str) -> tuple[str, bool]:
+    updated, changed = _replace_toml_key_assignment(contents, key_name, rendered_value)
+    if changed:
+        return updated, True
+
+    line = f"{key_name} = {rendered_value}\n"
+    if not contents:
+        return line, True
+
+    first_table_match = re.compile(r"(?m)^\[[^\n]+\]\s*(?:#.*)?$").search(contents)
+    if first_table_match is None:
+        return contents.rstrip("\n") + "\n" + line, True
+
+    prefix = contents[: first_table_match.start()].rstrip("\n")
+    suffix = contents[first_table_match.start() :].lstrip("\n")
+    if prefix:
+        prefix = prefix + "\n" + line.rstrip("\n")
+    else:
+        prefix = line.rstrip("\n")
+    return prefix + "\n\n" + suffix, True
+
+
+def _remove_toml_root_key(contents: str, key_name: str) -> tuple[str, bool]:
+    return _remove_toml_key_assignment(contents, key_name)
 
 
 def _remove_toml_key_assignment(contents: str, key_path: str) -> tuple[str, bool]:
@@ -391,6 +786,421 @@ def _remove_toml_table_key(contents: str, table_name: str, key_name: str) -> tup
     updated_section_body = section_body[: key_match.start()] + section_body[key_match.end() :]
     updated_contents = contents[:section_start] + updated_section_body + contents[section_end:]
     return _remove_empty_toml_table(updated_contents, table_name)
+
+
+def desktop_notification_hook_path(target: InstallTarget) -> Path:
+    return target.paths.config_dir / ".480ai" / "desktop-notify-hook.py"
+
+
+def opencode_desktop_notification_plugin_path(target: InstallTarget) -> Path:
+    return target.paths.config_dir / "plugins" / "480ai-desktop-notify.js"
+
+
+def load_desktop_notification_hook_template() -> str:
+    return DESKTOP_NOTIFICATION_HOOK_TEMPLATE
+
+
+def render_opencode_desktop_notification_plugin(hook_path: Path) -> str:
+    return OPENCODE_DESKTOP_NOTIFICATION_PLUGIN_TEMPLATE.replace("__NOTIFY_SCRIPT__", str(hook_path))
+
+
+def _desktop_notification_state(state: dict) -> dict[str, object] | None:
+    managed = state.get(DESKTOP_NOTIFICATION_STATE_KEY)
+    if not isinstance(managed, dict):
+        return None
+    files = managed.get(DESKTOP_NOTIFICATION_STATE_FILES_KEY)
+    if files is None:
+        managed[DESKTOP_NOTIFICATION_STATE_FILES_KEY] = {}
+        return managed
+    if not isinstance(files, dict):
+        managed[DESKTOP_NOTIFICATION_STATE_FILES_KEY] = {}
+    return managed
+
+
+def _desktop_notification_files_state(state: dict) -> dict[str, dict[str, object]] | None:
+    managed = _desktop_notification_state(state)
+    if managed is None:
+        return None
+    files = managed.get(DESKTOP_NOTIFICATION_STATE_FILES_KEY)
+    if not isinstance(files, dict):
+        return None
+    return files
+
+
+def desktop_notification_backup_path(target: InstallTarget, artifact_key: str) -> Path:
+    return target.paths.state_dir / "desktop-notifications" / f"{artifact_key}.bak"
+
+
+def capture_desktop_notification_asset_state(
+    target: InstallTarget,
+    state: dict,
+    *,
+    artifact_key: str,
+    path: Path,
+    desired_contents: str,
+) -> bool:
+    ensure_path_hierarchy_safe(path)
+    files_state = _desktop_notification_files_state(state)
+    if files_state is None:
+        managed = state.setdefault(DESKTOP_NOTIFICATION_STATE_KEY, {})
+        if not isinstance(managed, dict):
+            raise SystemExit("Invalid desktop notification state.")
+        managed[DESKTOP_NOTIFICATION_STATE_FILES_KEY] = {}
+        files_state = managed[DESKTOP_NOTIFICATION_STATE_FILES_KEY]
+        assert isinstance(files_state, dict)
+
+    file_state = files_state.get(artifact_key)
+    current_contents = path.read_text(encoding="utf-8") if path.exists() else None
+    if not isinstance(file_state, dict):
+        backup_relative: str | None = None
+        if current_contents is not None and current_contents != desired_contents:
+            backup = desktop_notification_backup_path(target, artifact_key)
+            ensure_path_hierarchy_safe(backup)
+            backup.parent.mkdir(parents=True, exist_ok=True)
+            write_text_atomic(backup, current_contents)
+            backup_relative = str(backup.relative_to(target.paths.state_dir))
+
+        files_state[artifact_key] = {
+            "present_before_install": current_contents is not None,
+            "backup": backup_relative,
+        }
+
+    if current_contents != desired_contents:
+        write_text_atomic(path, desired_contents)
+        if artifact_key == DESKTOP_NOTIFICATION_HOOK_ARTIFACT_KEY:
+            path.chmod(0o755)
+        return True
+    if artifact_key == DESKTOP_NOTIFICATION_HOOK_ARTIFACT_KEY and path.exists():
+        path.chmod(0o755)
+    return False
+
+
+def restore_desktop_notification_asset(
+    target: InstallTarget,
+    state: dict,
+    *,
+    artifact_key: str,
+    path: Path,
+    desired_contents: str,
+) -> bool:
+    ensure_path_hierarchy_safe(path)
+    files_state = _desktop_notification_files_state(state)
+    if files_state is None:
+        return False
+
+    file_state = files_state.get(artifact_key)
+    if not isinstance(file_state, dict):
+        return False
+
+    if not path.exists():
+        backup_relative = file_state.get("backup")
+        if isinstance(backup_relative, str) and backup_relative:
+            backup = target.paths.state_dir / backup_relative
+            if backup.exists():
+                backup.unlink()
+        files_state.pop(artifact_key, None)
+        return False
+
+    current_contents = path.read_text(encoding="utf-8")
+    if current_contents != desired_contents:
+        return False
+
+    backup_relative = file_state.get("backup")
+    if file_state.get("present_before_install") is True:
+        if isinstance(backup_relative, str) and backup_relative:
+            backup = target.paths.state_dir / backup_relative
+            if backup.exists():
+                write_text_atomic(path, backup.read_text(encoding="utf-8"))
+                if artifact_key == DESKTOP_NOTIFICATION_HOOK_ARTIFACT_KEY:
+                    path.chmod(0o755)
+                backup.unlink()
+                files_state.pop(artifact_key, None)
+                return True
+        return False
+
+    path.unlink()
+    if isinstance(backup_relative, str) and backup_relative:
+        backup = target.paths.state_dir / backup_relative
+        if backup.exists():
+            backup.unlink()
+    files_state.pop(artifact_key, None)
+    return True
+
+
+def install_desktop_notification_assets(target: InstallTarget, state: dict) -> bool:
+    hook_path = desktop_notification_hook_path(target)
+    hook_contents = load_desktop_notification_hook_template()
+    changed = capture_desktop_notification_asset_state(
+        target,
+        state,
+        artifact_key=DESKTOP_NOTIFICATION_HOOK_ARTIFACT_KEY,
+        path=hook_path,
+        desired_contents=hook_contents,
+    )
+
+    if target.name == "opencode":
+        plugin_path = opencode_desktop_notification_plugin_path(target)
+        plugin_contents = render_opencode_desktop_notification_plugin(hook_path)
+        changed = (
+            capture_desktop_notification_asset_state(
+                target,
+                state,
+                artifact_key=DESKTOP_NOTIFICATION_OPENCODE_PLUGIN_ARTIFACT_KEY,
+                path=plugin_path,
+                desired_contents=plugin_contents,
+            )
+            or changed
+        )
+
+    return changed
+
+
+def restore_desktop_notification_assets(target: InstallTarget, state: dict) -> bool:
+    hook_path = desktop_notification_hook_path(target)
+    hook_contents = load_desktop_notification_hook_template()
+    changed = restore_desktop_notification_asset(
+        target,
+        state,
+        artifact_key=DESKTOP_NOTIFICATION_HOOK_ARTIFACT_KEY,
+        path=hook_path,
+        desired_contents=hook_contents,
+    )
+
+    if target.name == "opencode":
+        plugin_path = opencode_desktop_notification_plugin_path(target)
+        plugin_contents = render_opencode_desktop_notification_plugin(hook_path)
+        changed = (
+            restore_desktop_notification_asset(
+                target,
+                state,
+                artifact_key=DESKTOP_NOTIFICATION_OPENCODE_PLUGIN_ARTIFACT_KEY,
+                path=plugin_path,
+                desired_contents=plugin_contents,
+            )
+            or changed
+        )
+
+    return changed
+
+
+def codex_desktop_notification_notify_value(target: InstallTarget) -> list[str]:
+    hook_path = desktop_notification_hook_path(target)
+    return [str(hook_path), "codex"]
+
+
+def merge_claude_desktop_notification_hook(
+    target: InstallTarget,
+    state: dict,
+    config: dict,
+    *,
+    command: str,
+    enabled: bool,
+) -> bool:
+    if not enabled or target.name != "claude":
+        return False
+
+    hook_entry = {
+        "hooks": [
+            {
+                "type": "command",
+                "command": command,
+            }
+        ]
+    }
+
+    managed_config = _managed_config_state(state)
+    if managed_config is None:
+        raise SystemExit("Claude config state is missing.")
+    if not isinstance(managed_config.get("claude_notification"), dict):
+        hooks = config.get("hooks")
+        if isinstance(hooks, dict) and "Notification" in hooks:
+            managed_config["claude_notification"] = {
+                "present": True,
+                "value": _json_value(hooks.get("Notification")),
+            }
+        else:
+            managed_config["claude_notification"] = {
+                "present": False,
+                "value": None,
+            }
+
+    hooks = config.get("hooks")
+    if hooks is None:
+        config["hooks"] = {"Notification": [hook_entry]}
+        return True
+    if not isinstance(hooks, dict):
+        config_path = target.paths.config_file
+        if config_path is None:
+            raise SystemExit("Claude notification hooks require a JSON object config file.")
+        raise SystemExit(f"Expected JSON object at {config_path} for hooks.")
+
+    notifications = hooks.get("Notification")
+    if notifications is None:
+        hooks["Notification"] = [hook_entry]
+        return True
+    if not isinstance(notifications, list):
+        config_path = target.paths.config_file
+        if config_path is None:
+            raise SystemExit("Claude notification hooks require a Notification hook array.")
+        raise SystemExit(f"Expected JSON array at {config_path} for hooks.Notification.")
+    if hook_entry in notifications:
+        return False
+
+    notifications.append(hook_entry)
+    return True
+
+
+def restore_claude_desktop_notification_hook(
+    target: InstallTarget,
+    state: dict,
+    config: dict,
+    *,
+    command: str,
+) -> bool:
+    if target.name != "claude":
+        return False
+
+    hook_entry = {
+        "hooks": [
+            {
+                "type": "command",
+                "command": command,
+            }
+        ]
+    }
+
+    hooks = config.get("hooks")
+    if not isinstance(hooks, dict):
+        return False
+
+    notifications = hooks.get("Notification")
+    if not isinstance(notifications, list):
+        return False
+
+    managed_config = _managed_config_state(state)
+    if managed_config is None:
+        return False
+
+    notification_state = managed_config.get("claude_notification")
+    if not isinstance(notification_state, dict):
+        return False
+
+    original_present = notification_state.get("present") is True
+    original_value = notification_state.get("value")
+    if original_present and isinstance(original_value, list) and hook_entry in original_value:
+        return False
+
+    if original_present:
+        if not isinstance(original_value, list):
+            return False
+        desired_notifications = original_value + [hook_entry]
+    else:
+        desired_notifications = [hook_entry]
+
+    if notifications != desired_notifications:
+        return False
+
+    if original_present:
+        hooks["Notification"] = original_value
+    else:
+        hooks.pop("Notification", None)
+        if not hooks:
+            config.pop("hooks", None)
+    return True
+
+
+def merge_codex_desktop_notification_hook(
+    target: InstallTarget,
+    state: dict,
+    config: dict,
+    *,
+    enabled: bool,
+) -> bool:
+    if not enabled or target.name != "codex":
+        return False
+
+    config_path = target.paths.config_file
+    if config_path is None:
+        raise SystemExit("Install target 'codex' is missing a config file path.")
+    ensure_path_hierarchy_safe(config_path)
+
+    managed_config = _managed_config_state(state)
+    if managed_config is None:
+        raise SystemExit("Codex config state is missing.")
+
+    existing_notify_state = managed_config.get("codex_notify")
+    if not isinstance(existing_notify_state, dict):
+        managed_config["codex_notify"] = {
+            "present": "notify" in config,
+            "value": _json_value(config.get("notify")) if "notify" in config else None,
+        }
+
+    existing = config_path.read_text(encoding="utf-8") if config_path.exists() else ""
+    desired_notify = _render_toml_value(codex_desktop_notification_notify_value(target))
+    updated, changed = _merge_toml_root_key(existing, "notify", desired_notify)
+    if updated.strip():
+        toml_module = load_toml_module()
+        try:
+            toml_module.loads(updated)
+        except toml_module.TOMLDecodeError as exc:
+            raise SystemExit(f"Invalid TOML generated for {config_path}: {exc}") from exc
+    if not changed:
+        return False
+
+    write_text_atomic(config_path, updated.rstrip("\n") + "\n")
+    return True
+
+
+def restore_codex_desktop_notification_hook(
+    target: InstallTarget,
+    state: dict,
+    config: dict,
+) -> bool:
+    if target.name != "codex":
+        return False
+
+    config_path = target.paths.config_file
+    if config_path is None or not config_path.exists():
+        return False
+    ensure_path_hierarchy_safe(config_path)
+
+    managed_config = _managed_config_state(state)
+    if managed_config is None:
+        return False
+    notify_state = managed_config.get("codex_notify")
+    if not isinstance(notify_state, dict):
+        return False
+
+    current_notify = config.get("notify")
+    desired_notify = codex_desktop_notification_notify_value(target)
+    if current_notify != desired_notify:
+        return False
+
+    existing = config_path.read_text(encoding="utf-8")
+    updated = existing
+    changed = False
+    if notify_state.get("present") is True:
+        original_value = notify_state.get("value")
+        updated, changed = _merge_toml_root_key(updated, "notify", _render_toml_value(original_value))
+    else:
+        updated, changed = _remove_toml_root_key(updated, "notify")
+
+    if not changed:
+        return False
+
+    toml_module = load_toml_module()
+    if updated.strip():
+        try:
+            toml_module.loads(updated)
+        except toml_module.TOMLDecodeError as exc:
+            raise SystemExit(f"Invalid TOML generated for {config_path}: {exc}") from exc
+
+    if not managed_config_existed_before_install(state) and not updated.strip():
+        config_path.unlink()
+        return True
+
+    write_text_atomic(config_path, updated.rstrip("\n") + "\n")
+    return True
 
 
 def merge_codex_subagent_settings(target: InstallTarget) -> bool:
@@ -1275,6 +2085,7 @@ def install(
     manage_default_activation: bool = True,
     state_updates: dict[str, object] | None = None,
     enable_claude_teams: bool = False,
+    enable_desktop_notifications: bool | None = None,
     codex_managed_guidance: str | None = None,
 ) -> None:
     ensure_source_agents_exist(target, source_agents_dir, agent_names)
@@ -1291,6 +2102,8 @@ def install(
     if state_updates:
         state.update(state_updates)
     capture_managed_config_state_on_install(target, state, config)
+    if enable_desktop_notifications is True:
+        install_desktop_notification_assets(target, state)
     guidance_path = codex_guidance_path(target)
     if guidance_path is not None:
         set_codex_guidance_state_on_install(target, state, guidance_path)
@@ -1398,6 +2211,33 @@ def install(
         write_target_config(target, config)
 
     merge_codex_subagent_settings(target)
+    desktop_notification_changed = False
+    if enable_desktop_notifications is True and target.name == "codex":
+        desktop_notification_changed = merge_codex_desktop_notification_hook(target, state, config, enabled=True)
+    if enable_desktop_notifications is True and target.name == "claude":
+        desktop_notification_changed = merge_claude_desktop_notification_hook(
+            target,
+            state,
+            config,
+            command=f"{shlex.quote(str(desktop_notification_hook_path(target)))} claude",
+            enabled=True,
+        )
+        if desktop_notification_changed:
+            write_target_config(target, config)
+    if enable_desktop_notifications is False:
+        if target.name == "codex":
+            desktop_notification_changed = restore_codex_desktop_notification_hook(target, state, config)
+        elif target.name == "claude":
+            desktop_notification_changed = restore_claude_desktop_notification_hook(
+                target,
+                state,
+                config,
+                command=f"{shlex.quote(str(desktop_notification_hook_path(target)))} claude",
+            )
+            if desktop_notification_changed:
+                write_target_config(target, config)
+        if restore_desktop_notification_assets(target, state):
+            desktop_notification_changed = True
 
     sync_codex_managed_guidance_install(target, state, codex_managed_guidance)
 
@@ -1423,6 +2263,18 @@ def uninstall(target: InstallTarget, source_agents_dir: Path, agent_names: list[
     if migrate_legacy_paths_and_activation(target, state, config):
         write_target_config(target, config)
         write_state(target, state)
+
+    if target.name == "codex":
+        restore_codex_desktop_notification_hook(target, state, config)
+    elif target.name == "claude":
+        claude_desktop_changed = restore_claude_desktop_notification_hook(
+            target,
+            state,
+            config,
+            command=f"{shlex.quote(str(desktop_notification_hook_path(target)))} claude",
+        )
+        if claude_desktop_changed:
+            write_target_config(target, config)
 
     for name in state.get("managed_agents", agent_names):
         destination = installed_agent_path(target, name)
@@ -1458,6 +2310,7 @@ def uninstall(target: InstallTarget, source_agents_dir: Path, agent_names: list[
     restore_codex_subagent_settings(target, state, config)
 
     sync_codex_managed_guidance_uninstall(target, state)
+    restore_desktop_notification_assets(target, state)
 
     write_state(target, state)
 
