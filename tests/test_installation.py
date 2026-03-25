@@ -1625,7 +1625,7 @@ manage_agents.install(target="codex", scope="user")
             self.assertEqual(merged["model"], "gpt-5.4")
             self.assertFalse(merged["features"]["unified_exec"])
             self.assertTrue(merged["features"]["multi_agent"])
-            self.assertEqual(merged["agents"]["max_threads"], 4)
+            self.assertEqual(merged["agents"]["max_threads"], 100)
             self.assertEqual(merged["agents"]["max_depth"], 2)
 
     def test_codex_user_install_updates_existing_dotted_subagent_settings_in_place(self) -> None:
@@ -1644,9 +1644,11 @@ manage_agents.install(target="codex", scope="user")
             merged = tomllib.loads(config_text)
             self.assertTrue(merged["features"]["multi_agent"])
             self.assertEqual(merged["agents"]["max_depth"], 2)
+            self.assertEqual(merged["agents"]["max_threads"], 100)
             self.assertEqual(merged["model"], "gpt-5.4")
             self.assertEqual(config_text.count("features.multi_agent"), 1)
             self.assertEqual(config_text.count("agents.max_depth"), 1)
+            self.assertEqual(config_text.count("agents.max_threads"), 1)
 
     def test_codex_user_install_replaces_managed_block_in_place_and_preserves_user_tail(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
