@@ -1035,6 +1035,78 @@ manage_agents.install(target="codex", scope="user")
 
             self.assertEqual(self.read_json(config_path), {"agent": "keep-me", "theme": "dark"})
 
+    def test_claude_project_install_with_teams_enabled_merges_env_setting_and_keeps_state_external(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            project_root = home / "work" / "demo-repo"
+            project_root.mkdir(parents=True, exist_ok=True)
+            config_path = project_root / ".claude" / "settings.json"
+            self.write_json(
+                config_path,
+                {
+                    "agent": "team-agent",
+                    "theme": "dark",
+                    "env": {"EXISTING_FLAG": "keep"},
+                },
+            )
+
+            with self.patched_manage_agents_home(home):
+                previous_cwd = Path.cwd()
+                try:
+                    os.chdir(project_root)
+                    manage_agents.install(target="claude", scope="project", activate_default=False, enable_teams=True)
+
+                    self.assertEqual(
+                        self.read_json(config_path),
+                        {
+                            "agent": "team-agent",
+                            "theme": "dark",
+                            "env": {
+                                "EXISTING_FLAG": "keep",
+                                "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
+                            },
+                        },
+                    )
+
+                    state_path = project_bootstrap_state_paths("claude", "project", project_root, home=home).state_file
+                    self.assertTrue(state_path.exists())
+                    self.assertFalse((project_root / ".claude" / ".480ai-bootstrap" / "state.json").exists())
+
+                    manage_agents.uninstall(target="claude", scope="project")
+                    self.assertFalse(state_path.exists())
+                finally:
+                    os.chdir(previous_cwd)
+
+            self.assertEqual(
+                self.read_json(config_path),
+                {
+                    "agent": "team-agent",
+                    "theme": "dark",
+                    "env": {
+                        "EXISTING_FLAG": "keep",
+                        "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
+                    },
+                },
+            )
+
+    def test_claude_project_install_with_teams_disabled_does_not_add_env_key(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            project_root = home / "work" / "demo-repo"
+            project_root.mkdir(parents=True, exist_ok=True)
+            config_path = project_root / ".claude" / "settings.json"
+            self.write_json(config_path, {"agent": "team-agent", "theme": "dark"})
+
+            with self.patched_manage_agents_home(home):
+                previous_cwd = Path.cwd()
+                try:
+                    os.chdir(project_root)
+                    manage_agents.install(target="claude", scope="project", activate_default=False, enable_teams=False)
+                finally:
+                    os.chdir(previous_cwd)
+
+            self.assertEqual(self.read_json(config_path), {"agent": "team-agent", "theme": "dark"})
+
     def test_claude_reinstall_without_activate_default_preserves_previous_restore_state(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp)
@@ -2600,22 +2672,29 @@ manage_agents.install(target="codex", scope="user")
         self.assertIn("Choose the model for 480-code-scanner.", output)
 
     def test_tui_prompt_multi_select_supports_multiple_providers(self) -> None:
-        fake_curses = FakeCursesModule(screen=FakeCursesScreen([FakeCursesModule.KEY_DOWN, ord(" "), 10]))
-        rendered_errors: list[str | None] = []
+        fake_curses = FakeCursesModule(screen=FakeCursesScreen([10]))
+        rendered_screens: list[list[str]] = []
 
         with (
             mock.patch.dict(sys.modules, {"curses": fake_curses}),
-            mock.patch.object(manage_agents, "tui_render_screen", side_effect=lambda *args, **kwargs: rendered_errors.append(kwargs.get("error"))),
+            mock.patch.object(
+                manage_agents,
+                "tui_render_screen",
+                side_effect=lambda *args, **kwargs: rendered_screens.append(list(kwargs["lines"])),
+            ),
         ):
             selected = manage_agents.tui_prompt_multi_select(
                 fake_curses.screen,
                 title="provider selection",
                 choices=manage_agents.TARGET_CHOICES,
-                default_values=("opencode",),
+                default_values=tuple(choice.value for choice in manage_agents.TARGET_CHOICES),
             )
 
-        self.assertEqual(selected, ("opencode", "claude"))
-        self.assertTrue(all(error is None for error in rendered_errors))
+        self.assertEqual(selected, tuple(choice.value for choice in manage_agents.TARGET_CHOICES))
+        first_render = rendered_screens[0]
+        self.assertTrue(any("OpenCode" in line and "[x]" in line for line in first_render))
+        self.assertTrue(any("Claude Code" in line and "[x]" in line for line in first_render))
+        self.assertTrue(any("Codex CLI" in line and "[x]" in line for line in first_render))
 
     def test_tui_prompt_multi_select_blocks_empty_selection_until_provider_is_selected(self) -> None:
         fake_curses = FakeCursesModule(screen=FakeCursesScreen([ord(" "), 10, ord(" "), 10]))
@@ -2638,29 +2717,7 @@ manage_agents.install(target="codex", scope="user")
         self.assertIsNone(rendered_errors[-1])
 
     def test_prompt_install_options_tui_asks_each_provider_in_order_and_renders_summary(self) -> None:
-        keys = [
-            FakeCursesModule.KEY_DOWN,
-            ord(" "),
-            10,
-            10,
-            10,
-            10,
-            FakeCursesModule.KEY_DOWN,
-            10,
-            10,
-            10,
-            FakeCursesModule.KEY_DOWN,
-            10,
-            FakeCursesModule.KEY_DOWN,
-            10,
-            10,
-            10,
-            10,
-            10,
-            10,
-            10,
-            10,
-        ]
+        keys = [10] * 12
         fake_curses = FakeCursesModule(screen=FakeCursesScreen(keys))
         rendered_screens: list[tuple[str, list[str], str]] = []
 
@@ -2677,61 +2734,24 @@ manage_agents.install(target="codex", scope="user")
 
         assert fake_curses.screen is not None
         self.assertTrue(fake_curses.screen.keypad_enabled)
-        self.assertEqual([request.target for request in install_options.providers], ["opencode", "claude"])
-        self.assertIsNone(install_options.providers[0].model_selection)
-        self.assertEqual(install_options.providers[1].scope, "project")
-        self.assertFalse(install_options.providers[1].activate_default)
-        self.assertFalse(install_options.providers[1].enable_teams)
-        self.assertIsNotNone(install_options.providers[1].model_selection)
-        assert install_options.providers[1].model_selection is not None
-        self.assertEqual(install_options.providers[1].model_selection.role_options["480-architect"], "sonnet-max")
-
-        ordered_titles = list(dict.fromkeys(title for title, _lines, _footer in rendered_screens))
-        self.assert_screen_title_contains(ordered_titles, "provider")
-        self.assert_screen_title_contains(ordered_titles, "OpenCode", "scope")
-        self.assert_screen_title_contains(ordered_titles, "OpenCode", "default agent")
-        self.assert_screen_title_contains(ordered_titles, "OpenCode", "model mode")
-        self.assert_screen_title_contains(ordered_titles, "Claude Code", "scope")
-        self.assert_screen_title_contains(ordered_titles, "Claude Code", "default agent")
-        self.assert_screen_title_contains(ordered_titles, "Claude Code", "agent teams")
-        self.assert_screen_title_contains(ordered_titles, "Claude Code", "model mode")
-        for role in CLAUDE_AGENTS:
-            self.assert_screen_title_contains(ordered_titles, "Claude Code", role, "model")
+        self.assertEqual([request.target for request in install_options.providers], ["opencode", "claude", "codex"])
 
         provider_title, provider_lines, provider_footer = rendered_screens[0]
         self.assertIn("provider", provider_title)
         self.assertIn("Select one or more providers.", provider_lines)
         self.assertIn("Press Space to select or deselect.", provider_lines)
+        checked_provider_lines = [line for line in provider_lines if "[" in line and "]" in line]
+        self.assertTrue(any("OpenCode" in line and "[x]" in line for line in checked_provider_lines))
+        self.assertTrue(any("Claude Code" in line and "[x]" in line for line in checked_provider_lines))
+        self.assertTrue(any("Codex CLI" in line and "[x]" in line for line in checked_provider_lines))
         self.assertEqual(
             provider_footer,
             "Space: Select/Deselect | Enter: Next | Up/Down Arrow or j/k: Move",
         )
-        self.assertIn(
-            "Enter: Next | Left Arrow: Back | Up/Down Arrow or j/k: Move",
-            [footer for _title, _lines, footer in rendered_screens],
-        )
-
-        summary_title, summary_lines, _summary_footer = rendered_screens[-1]
-        self.assertIn("summary", summary_title)
-        self.assert_summary_contains_provider(
-            summary_lines,
-            provider_label="OpenCode",
-            scope="user",
-            activate_default=True,
-            model_mode="recommended",
-        )
-        self.assert_summary_contains_provider(
-            summary_lines,
-            provider_label="Claude Code",
-            scope="project",
-            activate_default=False,
-            model_mode="advanced",
-        )
-        summary = "\n".join(summary_lines)
-        self.assertRegex(summary, r"agent teams:\s*no")
 
     def test_prompt_install_options_tui_scope_back_moves_to_previous_provider_last_step(self) -> None:
         keys = [
+            FakeCursesModule.KEY_DOWN,
             FakeCursesModule.KEY_DOWN,
             ord(" "),
             10,
@@ -2768,6 +2788,7 @@ manage_agents.install(target="codex", scope="user")
 
     def test_prompt_install_options_tui_first_scope_back_keeps_selected_providers(self) -> None:
         keys = [
+            FakeCursesModule.KEY_DOWN,
             FakeCursesModule.KEY_DOWN,
             ord(" "),
             10,

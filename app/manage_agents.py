@@ -682,7 +682,6 @@ def build_install_summary_lines(requests: tuple[ProviderInstallRequest, ...]) ->
 
 def prompt_install_options_tui() -> InstallOptions:
     target_choices = required_interactive_provider_choices()
-    default_target = interactive_default_target(target_choices)
     role_specs = tuple(load_bundle())
     try:
         import curses
@@ -705,7 +704,7 @@ def prompt_install_options_tui() -> InstallOptions:
                 screen,
                 title="Choose providers to install for 480/ai",
                 choices=target_choices,
-                default_values=(default_target,),
+                default_values=tuple(choice.value for choice in target_choices),
             )
         )
         state_by_target: dict[str, dict[str, Any]] = {}
