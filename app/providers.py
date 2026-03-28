@@ -425,7 +425,7 @@ CODEX_MODEL_SELECTION_SCHEMA = ProviderModelSelectionSchema(
             "480-developer": _role_config("gpt-5.4-mini", "medium"),
             "480-code-scanner": _role_config("gpt-5.3-codex-spark", "low"),
             "480-code-reviewer": _role_config("gpt-5.4", "high"),
-            "480-code-reviewer2": _role_config("gpt-5.2", "medium"),
+            "480-code-reviewer2": _role_config("gpt-5.4", "medium"),
         },
     ),
     advanced={
@@ -460,6 +460,7 @@ CODEX_MODEL_SELECTION_SCHEMA = ProviderModelSelectionSchema(
             _role_option("gpt-5.4-medium", "GPT-5.4 / medium", model="gpt-5.4", effort="medium"),
         ),
         "480-code-reviewer2": (
+            _role_option("gpt-5.4-medium", "GPT-5.4 / medium", model="gpt-5.4", effort="medium"),
             _role_option("gpt-5.2-medium", "GPT-5.2 / medium", model="gpt-5.2", effort="medium"),
             _role_option(
                 "spark-medium",
