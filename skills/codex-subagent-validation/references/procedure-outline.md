@@ -2,7 +2,7 @@
 
 ## Scope
 
-Use this document when repeating the following Codex-specific harness validation:
+Use this document when repeating the following Codex-specific validation:
 
 - user-level `~/.codex` install state
 - the scope of `~/.codex/AGENTS.md` managed guidance
@@ -16,7 +16,7 @@ Use this document when repeating the following Codex-specific harness validation
 3. Confirm that legacy `480-architect.toml` or `480.toml` artifacts are not present.
 4. Reinstall Codex when that matches the task intent.
 5. Validate `480-developer` delegation in a separate Codex session.
-6. Distinguish harness regressions from known platform constraints such as `codex exec`.
+6. Distinguish install issues from known platform constraints such as `codex exec`.
 
 ## Recommended command order
 
@@ -58,21 +58,23 @@ Success signals are:
 Use `codex exec` only as a secondary diagnostic path.
 
 - Treat responses such as `parent thread rollout unavailable for fork` as exec-path limitations.
-- If the normal Codex session validation succeeds, classify the issue as a platform blocker rather than a harness regression.
-- Only raise the likelihood of a real regression when the normal Codex session shows the same failure.
+- If the normal Codex session validation succeeds and the fallback `codex exec` diagnostic is fork-limited, classify the issue as `exec_path_limitation` and reserve `platform_blocker` for hard diagnostic failures.
+- Only raise the likelihood of a real install issue when the normal Codex session shows the same failure.
 
 ## Result classification
 
 - Success:
   - Reinstall applied cleanly
   - No legacy leftovers remain
-  - In a separate Codex session, `480-developer` keeps its role and does not redelegate to itself
-- Harness regression:
+  - The automated `verify` install health is clean, and the fallback `codex exec` diagnostic is either clean or classified as `exec_path_limitation`
+- Install issue:
   - Managed guidance is stale or incorrect
   - Legacy leftovers remain after reinstall
-  - In a separate Codex session, `480-developer` behaves like the architect or redelegates itself
+  - The automated `verify` install health fails
+- Exec path limitation:
+  - Install state is fine, and the fallback `codex exec` diagnostic is limited by fork behavior
 - Platform blocker:
-  - Install state is fine, but the chosen Codex execution path does not support fork behavior or cannot complete the validation flow
+  - Install state is fine, but the chosen Codex execution path cannot complete the diagnostic flow for a hard reason such as a missing binary or nonzero exit
 
 ## Notes
 
@@ -84,7 +86,7 @@ Use `codex exec` only as a secondary diagnostic path.
 ```text
 install_state: ...
 cleanup_result: ...
-general_session_validation: ...
+general_session_validation: not_run | ok | blocked
 exec_path_result: ...
-final_classification: success | harness_regression | platform_blocker
+final_classification: success | exec_path_limitation | install_issue | platform_blocker
 ```

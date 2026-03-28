@@ -9,7 +9,7 @@ description: Reinstall Codex, check user-level AGENTS and legacy subagent leftov
 
 Use this skill when you need to repeat the Codex-specific validation flow. It checks install state, the user-level AGENTS scope, whether legacy agent artifacts were cleaned up, and whether actual `480-developer` delegation works.
 
-Prefer the simplest path that can distinguish a harness regression from a Codex platform limitation.
+Prefer the simplest path that can distinguish an install issue from a Codex platform limitation.
 
 ## Workflow shape
 
@@ -19,7 +19,7 @@ This skill follows a sequential, workflow-based validation process.
 2. Check the `~/.codex` install state and any legacy leftovers.
 3. Reinstall Codex if needed.
 4. Validate delegation behavior in a separate Codex session.
-5. Classify the result as success, harness regression, or platform blocker.
+5. Classify the result as success, exec_path_limitation, install_issue, or platform_blocker.
 
 ## Quick start
 
@@ -31,16 +31,17 @@ Use this as the default path:
 4. Start a separate Codex session with `codex --no-alt-screen` and validate `480-developer` delegation from the normal session path.
 5. Summarize the result as one of the following:
    - success
-   - harness regression
-   - platform blocker
+   - exec_path_limitation
+   - install_issue
+   - platform_blocker
 
-Treat `codex exec` only as a secondary path. Responses such as `parent thread rollout unavailable for fork` can be exec-path limitations, so do not classify them as harness regressions on that signal alone.
+Treat `codex exec` only as a secondary path. Responses such as `parent thread rollout unavailable for fork` can be exec-path limitations, so do not classify them as install issues on that signal alone.
 
 ## Resources
 
 ### references/
 
-Read [references/procedure-outline.md](references/procedure-outline.md) when you need the detailed checklist, expected signals, or the boundary between a real regression and a known `exec` limitation.
+Read [references/procedure-outline.md](references/procedure-outline.md) when you need the detailed checklist, expected signals, or the boundary between an install issue and a known `exec` limitation.
 
 Read [references/validation-prompts.md](references/validation-prompts.md) when you need prompt examples and result-reporting formats for a separate Codex session.
 
@@ -56,7 +57,7 @@ Report these three things at minimum:
 
 1. The install state before the change
 2. What changed during reinstall or cleanup
-3. Whether the separate Codex validation succeeded, regressed, or hit a platform limit
+3. Whether the separate Codex validation produced `success`, `exec_path_limitation`, `install_issue`, or `platform_blocker`
 
 If possible, summarize using the following keys:
 
@@ -65,3 +66,7 @@ If possible, summarize using the following keys:
 - `general_session_validation`
 - `exec_path_result`
 - `final_classification`
+
+When using `python3 -m app.manage_agents verify`, treat `general_session_validation` as the separate normal-session check and `exec_path_result` as the diagnostic fallback path. The automated verify command reports the install health separately from the fallback path and does not replace a real normal Codex session validation.
+
+If `exec_path_result` comes back limited by fork behavior, expect `final_classification` to be `exec_path_limitation`; hard failures such as a missing `codex` binary or a nonzero exec run should still surface as `platform_blocker`.
