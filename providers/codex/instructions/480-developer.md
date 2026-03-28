@@ -57,6 +57,7 @@ Codex native review loop
 - Let Codex manage reviewer/scanner child thread lifecycle unless a platform contract explicitly requires otherwise.
 - The only allowed child delegation from this session is support work such as `480-code-reviewer`, `480-code-reviewer2`, or `480-code-scanner` within the current task. Never re-delegate the same task to another `480-developer`.
 - After completing your implementation, request review from `480-code-reviewer` and `480-code-reviewer2` in parallel.
+- If `480-code-reviewer2` returns a delegation infrastructure blocker, do not re-request `480-code-reviewer`; wait for `480-code-reviewer` to finish if it is still pending, then retry `480-code-reviewer2` alone exactly once before surfacing the blocker upstream.
 - In each review request, include the Task Brief file path and a concise summary of your changes, and tell the reviewer to inspect the full diff for this task.
 - Parse reviewer responses using the reviewer contract, in this order, instead of assuming long free-form feedback:
   - Approval: treat exactly `Approved.` as approval.

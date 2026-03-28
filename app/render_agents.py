@@ -425,6 +425,7 @@ def render_codex_agents_index(
             "- Codex uses a native subagent workflow. The architect spawns `480-developer`, and the developer uses reviewer/scanner subagents only when needed.",
             "- The default delegation depth is 2: architect(depth 0) -> developer(depth 1) -> reviewer/scanner(depth 2).",
             "- The default reviewer flow is parallel: call `480-code-reviewer` and `480-code-reviewer2` together.",
+            "- If `480-code-reviewer2` returns a delegation infrastructure blocker, do not re-request `480-code-reviewer`; wait for `480-code-reviewer` to finish if it is still pending, then retry `480-code-reviewer2` alone exactly once before surfacing the blocker upstream.",
             "- Reviewers review in-thread. `480-code-reviewer` and `480-code-reviewer2` do not spawn additional subagents.",
             "- Keep the concurrent agent budget narrow. Outside the review step, the default path activates only one child agent at a time.",
             "- When possible, the architect plans and delegates with a dedicated worktree and task branch as the default operating model.",

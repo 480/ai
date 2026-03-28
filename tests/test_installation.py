@@ -605,7 +605,7 @@ class InstallationTests(unittest.TestCase):
         self.assertEqual(codex_reviewer.effort, "high")
 
         codex_reviewer2 = codex.recommended_role_model_config(specs["480-code-reviewer2"])
-        self.assertEqual(codex_reviewer2.model, "gpt-5.2")
+        self.assertEqual(codex_reviewer2.model, "gpt-5.4")
         self.assertEqual(codex_reviewer2.effort, "medium")
 
     def test_provider_model_profiles_define_advanced_curated_options_for_every_role(self) -> None:
@@ -649,8 +649,13 @@ class InstallationTests(unittest.TestCase):
         )
         self.assertEqual(
             get_provider("codex").default_advanced_role_model_option(specs["480-code-reviewer2"]).key,
-            "gpt-5.2-medium",
+            "gpt-5.4-medium",
         )
+        reviewer2_option_keys = {
+            option.key for option in get_provider("codex").advanced_role_model_options("480-code-reviewer2")
+        }
+        self.assertIn("gpt-5.4-medium", reviewer2_option_keys)
+        self.assertIn("gpt-5.2-medium", reviewer2_option_keys)
 
     def test_target_agent_names_use_provider_registry_for_all_targets(self) -> None:
         self.assertEqual(agent_bundle.target_agent_names("opencode"), AGENTS)
@@ -4833,6 +4838,10 @@ manage_agents.install(target="codex", scope="user")
         self.assertIn("Codex install/uninstall also clean up legacy `480-architect.toml` and `480.toml` leftovers when present.", codex_index)
         self.assertIn("The default delegation depth is 2:", codex_index)
         self.assertIn("The default reviewer flow is parallel", codex_index)
+        self.assertIn(
+            "If `480-code-reviewer2` returns a delegation infrastructure blocker, do not re-request `480-code-reviewer`; wait for `480-code-reviewer` to finish if it is still pending, then retry `480-code-reviewer2` alone exactly once before surfacing the blocker upstream.",
+            codex_index,
+        )
         self.assertIn("Reviewers review in-thread", codex_index)
         self.assertIn("Keep the concurrent agent budget narrow", codex_index)
         self.assertIn("dedicated worktree and task branch", codex_index)
@@ -4959,6 +4968,10 @@ manage_agents.install(target="codex", scope="user")
             "Do not treat a progress update as a completion report or stop the implementation or review loop.",
             codex_developer["developer_instructions"],
         )
+        self.assertIn(
+            "If `480-code-reviewer2` returns a delegation infrastructure blocker, do not re-request `480-code-reviewer`; wait for `480-code-reviewer` to finish if it is still pending, then retry `480-code-reviewer2` alone exactly once before surfacing the blocker upstream.",
+            codex_developer["developer_instructions"],
+        )
 
         codex_reviewer = tomllib.loads((provider_agents_source_dir("codex") / "480-code-reviewer.toml").read_text(encoding="utf-8"))
         self.assert_codex_close_contract(
@@ -5034,7 +5047,7 @@ manage_agents.install(target="codex", scope="user")
             agents_index,
         )
         self.assertIn(
-            "- `480-code-reviewer2`\n  - maps from: `480-code-reviewer2`\n  - file: `providers/codex/agents/480-code-reviewer2.toml`\n  - model: `gpt-5.2`\n  - reasoning: `medium`",
+            "- `480-code-reviewer2`\n  - maps from: `480-code-reviewer2`\n  - file: `providers/codex/agents/480-code-reviewer2.toml`\n  - model: `gpt-5.4`\n  - reasoning: `medium`",
             agents_index,
         )
         self.assertIn(
@@ -5420,7 +5433,7 @@ manage_agents.install(target="codex", scope="user")
         codex_reviewer2 = tomllib.loads(
             render_agents.render_codex_agent(specs["480-code-reviewer2"], codex_name_map)
         )
-        self.assertEqual(codex_reviewer2["model"], "gpt-5.2")
+        self.assertEqual(codex_reviewer2["model"], "gpt-5.4")
         self.assertEqual(codex_reviewer2["model_reasoning_effort"], "medium")
 
     def test_codex_reviewer_contract_and_model_alignment_are_pinned_in_sources_and_rendered_outputs(self) -> None:
@@ -5429,7 +5442,7 @@ manage_agents.install(target="codex", scope="user")
 
         for agent_id, expected_model, expected_effort in (
             ("480-code-reviewer", "gpt-5.4", "high"),
-            ("480-code-reviewer2", "gpt-5.2", "medium"),
+            ("480-code-reviewer2", "gpt-5.4", "medium"),
         ):
             common_source_instruction = (
                 REPO_ROOT / "bundles" / "common" / "instructions" / f"{agent_id}.md"
