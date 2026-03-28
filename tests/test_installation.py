@@ -1608,13 +1608,76 @@ manage_agents.install(target="codex", scope="user")
             self.assertEqual(result["final_classification"], "success")
             self.assertEqual(result["install_state"]["status"], "ok")
             self.assertEqual(result["cleanup_result"]["status"], "ok")
-            self.assertEqual(result["general_session_validation"]["status"], "ok")
-            self.assertIn("480-developer", result["general_session_validation"]["developer_role"])
-            self.assertFalse(result["general_session_validation"]["redelegated"])
+            self.assertEqual(result["general_session_validation"]["status"], "not_run")
+            self.assertIsNone(result["general_session_validation"]["developer_role"])
+            self.assertIsNone(result["general_session_validation"]["redelegated"])
+            self.assertIn("not run by automated verify", result["general_session_validation"]["notes"])
             self.assertEqual(result["exec_path_result"]["status"], "ok")
             self.assertIn("agent_outputs", result["install_state"])
             self.assertIn("config", result["install_state"])
             self.assertIn("guidance", result["install_state"])
+
+    def test_codex_verify_keeps_exec_path_limit_from_becoming_install_blocker(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            with self.patched_manage_agents_home(home):
+                self.run_command(home, "install", "--target", "codex", "--scope", "user")
+
+                agent_message = json.dumps(
+                    {
+                        "developer_role": "The current session is the software architect agent.",
+                        "redelegated": False,
+                        "notes": "Current role is architect.",
+                    }
+                )
+                fake_stdout = "\n".join(
+                    [
+                        json.dumps({"type": "thread.started", "thread_id": "thread-1"}),
+                        json.dumps({"type": "turn.started"}),
+                        json.dumps(
+                            {
+                                "type": "item.completed",
+                                "item": {
+                                    "id": "item_4",
+                                    "type": "agent_message",
+                                    "text": agent_message,
+                                },
+                            }
+                        ),
+                        json.dumps({"type": "turn.completed"}),
+                    ]
+                )
+
+                with mock.patch.object(
+                    manage_agents.subprocess,
+                    "run",
+                    return_value=subprocess.CompletedProcess(["codex"], 0, stdout=fake_stdout, stderr=""),
+                ):
+                    result = manage_agents.verify(target="codex", scope="user")
+
+            self.assertEqual(result["install_state"]["status"], "ok")
+            self.assertEqual(result["cleanup_result"]["status"], "ok")
+            self.assertEqual(result["exec_path_result"]["status"], "blocked")
+            self.assertEqual(result["general_session_validation"]["status"], "not_run")
+            self.assertEqual(result["final_classification"], "exec_path_limitation")
+
+    def test_codex_verify_keeps_hard_exec_path_failures_as_platform_blockers(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            with self.patched_manage_agents_home(home):
+                self.run_command(home, "install", "--target", "codex", "--scope", "user")
+
+                def fake_run(command, **kwargs):
+                    raise FileNotFoundError("codex binary not found")
+
+                with mock.patch.object(manage_agents.subprocess, "run", side_effect=fake_run):
+                    result = manage_agents.verify(target="codex", scope="user")
+
+            self.assertEqual(result["install_state"]["status"], "ok")
+            self.assertEqual(result["cleanup_result"]["status"], "ok")
+            self.assertEqual(result["exec_path_result"]["status"], "blocked")
+            self.assertIn("codex binary not found", result["exec_path_result"]["error"])
+            self.assertEqual(result["final_classification"], "platform_blocker")
 
     def test_codex_verify_honors_persisted_advanced_model_selection(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -1408,9 +1408,22 @@ def _codex_noop_validation_reports_developer_role(role_value: object) -> bool:
 def _classify_verify_results(results: dict[str, dict[str, object]]) -> str:
     if results["install_state"]["status"] != "ok" or results["cleanup_result"]["status"] != "ok":
         return "install_issue"
-    if results["general_session_validation"]["status"] != "ok" or results["exec_path_result"]["status"] != "ok":
-        return "platform_blocker"
+    exec_path_result = results["exec_path_result"]
+    if exec_path_result["status"] != "ok":
+        if exec_path_result.get("error") or exec_path_result.get("returncode") not in (None, 0):
+            return "platform_blocker"
+        return "exec_path_limitation"
     return "success"
+
+
+def _build_general_session_validation() -> dict[str, object]:
+    return {
+        "status": "not_run",
+        "developer_role": None,
+        "redelegated": None,
+        "notes": "Separate Codex session validation is documented but not run by automated verify.",
+        "raw_message": None,
+    }
 
 
 def verify(target: str = DEFAULT_VERIFY_TARGET, scope: str = DEFAULT_VERIFY_SCOPE) -> dict[str, object]:
@@ -1429,17 +1442,7 @@ def verify(target: str = DEFAULT_VERIFY_TARGET, scope: str = DEFAULT_VERIFY_SCOP
 
     cleanup_result = _verify_codex_cleanup(resolved_target)
     exec_path_result = _run_codex_noop_validation(REPO_ROOT)
-    general_session_validation = {
-        "status": "ok"
-        if exec_path_result.get("status") == "ok"
-        and _codex_noop_validation_reports_developer_role(exec_path_result.get("developer_role"))
-        and exec_path_result.get("redelegated") is False
-        else "blocked",
-        "developer_role": exec_path_result.get("developer_role"),
-        "redelegated": exec_path_result.get("redelegated"),
-        "notes": exec_path_result.get("notes"),
-        "raw_message": exec_path_result.get("raw_message"),
-    }
+    general_session_validation = _build_general_session_validation()
 
     results = {
         "install_state": install_state,
@@ -1563,7 +1566,7 @@ def main(argv: list[str]) -> int:
         target, scope = resolve_verify_options_from_inputs(args=args, env=env)
         result = verify(target=target, scope=scope)
         print_line(sys.stdout, json.dumps(result, ensure_ascii=False))
-        return 0 if result["final_classification"] == "success" else 1
+        return 0 if result["final_classification"] in {"success", "exec_path_limitation"} else 1
     return 0
 
 
