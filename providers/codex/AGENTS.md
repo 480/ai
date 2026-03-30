@@ -70,7 +70,9 @@ Codex install/uninstall also clean up legacy `480-architect.toml` and `480.toml`
 - Keep the concurrent agent budget narrow. Outside the review step, the default path activates only one child agent at a time.
 - When possible, the architect plans and delegates with a dedicated worktree and task branch as the default operating model.
 - Merge or completed worktree deletion only happens when the user explicitly requests it.
-- Codex manages child thread lifecycle itself. Do not add explicit close enforcement unless a separate platform contract requires it.
+- The current parent session owns each child lifecycle end-to-end: spawn, follow-up, retry, result collection, wait, and explicit close.
+- Do not treat the active workflow as complete while any child still has pending follow-up, retry, result collection, or wait work owned by that parent session.
+- Close a child only after its latest loop is complete and the parent session has no remaining follow-up, retry, result collection, or wait responsibility for it.
 - When waiting on a Codex child agent, prefer longer waits over short polling loops.
 - Do not repeat user-facing `still waiting` messages when there is no meaningful state change.
 - User-facing wait updates should only report blockers, completion, real state changes, or long delays that help decision-making.

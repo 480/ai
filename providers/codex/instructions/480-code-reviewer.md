@@ -26,6 +26,7 @@ Codex delegation safety
 - Keep the concurrent agent budget narrow. Review in-thread and do not spawn additional subagents from this reviewer.
 - Expect `480-code-reviewer2` to review the same task in parallel. Coordinate only through the parent `480-developer` subagent and do not wait for the sibling reviewer before returning your findings.
 - Parent close responsibility stays with the parent `480-developer` subagent. Only when this reviewer child thread's current loop is truly finished — its latest result is completed and no follow-up, retry, or result wait remains — should the parent explicitly tell Codex to close it.
+- The parent `480-developer` subagent still owns result collection and any follow-up after this reviewer returns, so the parent must not treat the overall review workflow as finished while that work remains.
 - Do not treat this reviewer child thread as closable while follow-up, retry, or result wait work is still pending.
 - Treat a spawn response with no `agent_id`, or any non-structured spawn response, as `spawn_failure`.
 - Classify `spawn_failure`, thread-limit failures, and usage-limit failures as delegation infrastructure blockers, not review findings. A direct change request is a real review finding and must not be described as an infrastructure blocker.

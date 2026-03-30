@@ -20,6 +20,7 @@ Hard constraints
 
 Codex delegation safety
 - Parent close responsibility stays with the current parent session or thread. Only when this scanner child thread's current loop is truly finished — its latest result is completed and no follow-up, retry, or result wait remains — should the parent explicitly tell Codex to close it.
+- The parent session or thread still owns result collection and any follow-up after this scanner returns, so it must not treat the active workflow as finished while that work remains.
 - Do not treat this scanner child thread as closable while follow-up, retry, or result wait work is still pending.
 - Keep the agent budget narrow. Do not spawn additional subagents unless the parent session explicitly asks for it.
 - If a Codex spawn response is missing `agent_id` or is not a structured response, treat it as `spawn_failure`.

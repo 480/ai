@@ -238,10 +238,29 @@ class InstallationTests(unittest.TestCase):
         self.assertRegex(text, r"agent teams")
         self.assertRegex(text, r"experimental flag")
 
-    def assert_codex_lifecycle_contract(self, text: str, *, lifecycle_line: str) -> None:
-        self.assertIn(lifecycle_line, text)
-        self.assertNotIn("explicitly tell Codex to close", text)
-        self.assertNotIn("explicitly close each completed reviewer child thread", text)
+    def assert_codex_lifecycle_contract(
+        self,
+        text: str,
+        *,
+        ownership_line: str,
+        active_work_line: str,
+        close_line: str,
+    ) -> None:
+        self.assertIn(ownership_line, text)
+        self.assertIn(active_work_line, text)
+        self.assertIn(close_line, text)
+        self.assertNotIn(
+            "Codex manages child thread lifecycle itself. Do not add explicit close enforcement unless a separate platform contract requires it.",
+            text,
+        )
+        self.assertNotIn(
+            "Let Codex manage child thread lifecycle unless a platform contract explicitly requires otherwise.",
+            text,
+        )
+        self.assertNotIn(
+            "Let Codex manage reviewer/scanner child thread lifecycle unless a platform contract explicitly requires otherwise.",
+            text,
+        )
         self.assertIn(
             "Treat a spawn response with no `agent_id`, or any non-structured spawn response, as `spawn_failure`.",
             text,
@@ -256,6 +275,23 @@ class InstallationTests(unittest.TestCase):
         self.assertIn("follow-up, retry, or result wait work", text)
         self.assertIn(
             "Treat a spawn response with no `agent_id`, or any non-structured spawn response, as `spawn_failure`.",
+            text,
+        )
+
+    def assert_claude_parent_lifecycle_contract(
+        self,
+        text: str,
+        *,
+        ownership_line: str,
+        active_work_line: str,
+        close_line: str,
+    ) -> None:
+        self.assertIn(ownership_line, text)
+        self.assertIn(active_work_line, text)
+        self.assertIn(close_line, text)
+        self.assertNotIn("Let Codex manage child thread lifecycle unless a platform contract explicitly requires otherwise.", text)
+        self.assertNotIn(
+            "Codex manages child thread lifecycle itself. Do not add explicit close enforcement unless a separate platform contract requires it.",
             text,
         )
 
@@ -4878,6 +4914,9 @@ manage_agents.install(target="codex", scope="user")
             encoding="utf-8"
         )
         opencode_architect = (provider_agents_source_dir("opencode") / "480-architect.md").read_text(encoding="utf-8")
+        claude_architect_source = (REPO_ROOT / "providers" / "claude" / "instructions" / "480-architect.md").read_text(
+            encoding="utf-8"
+        )
         claude_architect = (provider_agents_source_dir("claude") / "480-architect.md").read_text(encoding="utf-8")
         codex_managed_guidance = render_agents.render_codex_managed_guidance(agent_bundle.load_bundle())
 
@@ -4909,9 +4948,11 @@ manage_agents.install(target="codex", scope="user")
         self.assertIn("Keep the concurrent agent budget narrow", codex_index)
         self.assertIn("dedicated worktree and task branch", codex_index)
         self.assertIn("When possible, the architect plans and delegates with a dedicated worktree and task branch as the default operating model.", codex_index)
-        self.assertIn(
-            "Codex manages child thread lifecycle itself. Do not add explicit close enforcement unless a separate platform contract requires it.",
+        self.assert_codex_lifecycle_contract(
             codex_index,
+            ownership_line="The current parent session owns each child lifecycle end-to-end: spawn, follow-up, retry, result collection, wait, and explicit close.",
+            active_work_line="Do not treat the active workflow as complete while any child still has pending follow-up, retry, result collection, or wait work owned by that parent session.",
+            close_line="Close a child only after its latest loop is complete and the parent session has no remaining follow-up, retry, result collection, or wait responsibility for it.",
         )
         self.assertIn("When waiting on a Codex child agent, prefer longer waits over short polling loops.", codex_index)
         self.assertIn(
@@ -4961,17 +5002,39 @@ manage_agents.install(target="codex", scope="user")
             self.assertIn(expected_short_signoff_contract, architect_doc)
             self.assert_architect_autopilot_worktree_contract(architect_doc)
             self.assertNotIn("tell the user to add that path to the repo's `.gitignore`", architect_doc)
+        self.assertIn(expected_gitignore_contract, claude_architect_source)
+        self.assertIn(expected_short_signoff_contract, claude_architect_source)
+        self.assert_architect_autopilot_worktree_contract(claude_architect_source)
         self.assertIn(expected_gitignore_contract, claude_architect)
         self.assertIn(expected_short_signoff_contract, claude_architect)
         self.assert_architect_autopilot_worktree_contract(claude_architect)
+        self.assert_claude_parent_lifecycle_contract(
+            claude_architect_source,
+            ownership_line="In team mode, the parent session owns each delegated child lifecycle end-to-end.",
+            active_work_line="Do not treat a workflow, task, or plan step as complete while any spawned child still requires result collection, waiting, follow-up, or closure from you.",
+            close_line="After you spawn a child, keep the task active until you have collected the child's result, waited through any required follow-up, and explicitly closed or otherwise released finished child sessions.",
+        )
+        self.assert_claude_parent_lifecycle_contract(
+            claude_architect,
+            ownership_line="In team mode, the parent session owns each delegated child lifecycle end-to-end.",
+            active_work_line="Do not treat a workflow, task, or plan step as complete while any spawned child still requires result collection, waiting, follow-up, or closure from you.",
+            close_line="After you spawn a child, keep the task active until you have collected the child's result, waited through any required follow-up, and explicitly closed or otherwise released finished child sessions.",
+        )
         self.assertIn("Codex native delegation contract", codex_managed_guidance)
         self.assertIn("`480-developer` (depth 1) -> reviewer/scanner subagents only when needed (depth 2)", codex_managed_guidance)
         self.assertIn("Keep the concurrent agent budget narrow.", codex_managed_guidance)
         self.assertIn(
-            "Let Codex manage child thread lifecycle unless a platform contract explicitly requires otherwise.",
+            "The parent session owns each child lifecycle end-to-end: spawn, follow-up, retry, result collection, wait, and explicit close.",
             codex_managed_guidance,
         )
-        self.assertNotIn("explicitly tell Codex to close", codex_managed_guidance)
+        self.assertIn(
+            "Do not treat an active workflow as finished, or return a completed result, while any spawned child still has pending follow-up, retry, result collection, or wait work owned by the parent.",
+            codex_managed_guidance,
+        )
+        self.assertIn(
+            "Close a child only after its latest loop is complete and the parent has no remaining follow-up, retry, result collection, or wait responsibility for that child.",
+            codex_managed_guidance,
+        )
         self.assertIn("Treat a spawn response with no `agent_id`, or any non-structured spawn response, as `spawn_failure`.", codex_managed_guidance)
         self.assertIn("Any explicit change request from either reviewer is a real review finding and is never waived by this fallback.", codex_managed_guidance)
         self.assertIn("prefer longer waits over short polling loops", codex_managed_guidance)
@@ -4979,6 +5042,14 @@ manage_agents.install(target="codex", scope="user")
         self.assertIn("User-facing wait updates should be change-based", codex_managed_guidance)
         self.assertIn("Use follow-up status checks sparingly", codex_managed_guidance)
         self.assertIn("prefer the repo or worktree implied by the Task Brief path", codex_managed_guidance)
+        self.assertNotIn(
+            "Let Codex manage child thread lifecycle unless a platform contract explicitly requires otherwise.",
+            codex_managed_guidance,
+        )
+        self.assertNotIn(
+            "Codex manages child thread lifecycle itself. Do not add explicit close enforcement unless a separate platform contract requires it.",
+            codex_managed_guidance,
+        )
 
         common_developer = (REPO_ROOT / "bundles" / "common" / "instructions" / "480-developer.md").read_text(
             encoding="utf-8"
@@ -5011,7 +5082,9 @@ manage_agents.install(target="codex", scope="user")
         codex_developer = tomllib.loads((provider_agents_source_dir("codex") / "480-developer.toml").read_text(encoding="utf-8"))
         self.assert_codex_lifecycle_contract(
             codex_developer["developer_instructions"],
-            lifecycle_line="Let Codex manage reviewer/scanner child thread lifecycle unless a platform contract explicitly requires otherwise.",
+            ownership_line="This parent developer session owns each reviewer or scanner child lifecycle end-to-end: spawn, follow-up, retry, result collection, wait, and explicit close.",
+            active_work_line="Do not treat the current task as complete, or return a completion report, while any reviewer or scanner child still has pending follow-up, retry, result collection, or wait work owned by this session.",
+            close_line="Close a reviewer or scanner child only after its latest loop is complete and this session has no remaining follow-up, retry, result collection, or wait responsibility for that child.",
         )
         self.assert_developer_role_identity_contract(codex_developer["developer_instructions"], codex_style=True)
         self.assert_codex_developer_review_parse_contract(codex_developer["developer_instructions"])
@@ -5034,6 +5107,15 @@ manage_agents.install(target="codex", scope="user")
         self.assertIn(
             "If `480-code-reviewer2` returns a delegation infrastructure blocker, do not re-request `480-code-reviewer`; wait for `480-code-reviewer` to finish if it is still pending, then retry `480-code-reviewer2` alone exactly once before surfacing the blocker upstream.",
             codex_developer["developer_instructions"],
+        )
+        claude_developer = (provider_agents_source_dir("claude") / "480-developer.md").read_text(encoding="utf-8")
+        self.assertNotIn(
+            "Let Codex manage child thread lifecycle unless a platform contract explicitly requires otherwise.",
+            claude_developer,
+        )
+        self.assertNotIn(
+            "Codex manages child thread lifecycle itself. Do not add explicit close enforcement unless a separate platform contract requires it.",
+            claude_developer,
         )
 
         codex_reviewer = tomllib.loads((provider_agents_source_dir("codex") / "480-code-reviewer.toml").read_text(encoding="utf-8"))
