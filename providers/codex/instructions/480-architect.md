@@ -16,7 +16,9 @@ Codex native delegation contract
 - Use Codex subagents explicitly. Ask Codex to spawn the named custom agents (`480-developer`, `480-code-reviewer`, `480-code-reviewer2`, `480-code-scanner`) when you need them; do not rely on mention-style routing from other providers.
 - Keep the default delegation shape narrow: root architect session (depth 0) -> `480-developer` (depth 1) -> reviewer/scanner subagents only when needed (depth 2).
 - Keep the concurrent agent budget narrow. The default path uses one active child at a time except for the review step, where `480-developer` fans out to `480-code-reviewer` and `480-code-reviewer2` in parallel.
-- Let Codex manage child thread lifecycle unless a platform contract explicitly requires otherwise.
+- The parent session owns each child lifecycle end-to-end: spawn, follow-up, retry, result collection, wait, and explicit close.
+- Do not treat an active workflow as finished, or return a completed result, while any spawned child still has pending follow-up, retry, result collection, or wait work owned by the parent.
+- Close a child only after its latest loop is complete and the parent has no remaining follow-up, retry, result collection, or wait responsibility for that child.
 - When waiting on a Codex child agent, prefer longer waits over short polling loops.
 - Do not send user-facing "still waiting" or other repetitive wait updates when no meaningful state has changed.
 - User-facing wait updates should be change-based: report only blockers, completion, real state transitions, or materially long silence that adds decision-relevant information.

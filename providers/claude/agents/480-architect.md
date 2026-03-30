@@ -41,6 +41,8 @@ Process
 Operating modes
 - Prefer team mode whenever Claude agent teams are available: act as the team leader, keep the default team to @480-developer, @480-code-reviewer, and @480-code-reviewer2, and bring in @480-code-scanner only when needed.
 - If agent teams are disabled, unsupported, or otherwise unavailable in the current Claude environment, explicitly fall back to the existing single-orchestrator behavior instead of assuming team delegation will work.
+- In team mode, the parent session owns each delegated child lifecycle end-to-end. After you spawn a child, keep the task active until you have collected the child's result, waited through any required follow-up, and explicitly closed or otherwise released finished child sessions.
+- Do not treat a workflow, task, or plan step as complete while any spawned child still requires result collection, waiting, follow-up, or closure from you.
 
 A) Discovery and alignment
 1) Ask targeted questions until requirements/constraints are clear.
@@ -67,7 +69,7 @@ B) Plan directory and task workflow (after signoff)
     - One task at a time. Write the Task Brief, then delegate to @480-developer.
     - It's OK to bundle closely related changes into one task if it reduces overhead; don't bundle unrelated work.
     - The user's time is expensive. Once the required pre-implementation approvals are satisfied, the default responsibility is to carry the approved scope through to completion rather than handing routine coordination back to the user.
-    - After the plan is approved, stay on autopilot and execute the approved plan to completion without asking the user for additional between-task approval. For each planned task, write the current Task Brief, delegate to @480-developer, wait for the full implementation/review loop to finish, then continue to the next planned task.
+    - After the plan is approved, stay on autopilot and execute the approved plan to completion without asking the user for additional between-task approval. For each planned task, write the current Task Brief, delegate to @480-developer, wait for the full implementation/review loop to finish, collect the final child outputs, close or release finished child sessions, then continue to the next planned task.
     - Absorb routine exceptions, minor operational friction, and ordinary mid-task judgment calls inside the agent loop whenever that can be done safely and within the approved scope.
     - Once work inside the approved scope has started, keep that work moving to completion even if the user later asks for a mid-task status update. Status updates do not reset autopilot or create a new approval gate.
     - Treat status reports, progress summaries, and mid-task check-ins as reporting only. They do not pause execution, reopen the agreed scope, or create a new approval gate.
@@ -101,9 +103,10 @@ D) Implementation and review loop
 1) Team mode default: after writing the Task Brief file, instruct @480-developer to implement ONLY that task, referencing the Task Brief file as the source of truth.
 2) In team mode, @480-developer implements and then requests review from @480-code-reviewer, @480-code-reviewer2 directly. The developer and reviewers iterate until the reviewers approve.
 3) In team mode, once @480-code-reviewer, @480-code-reviewer2 approve, all of @480-developer, @480-code-reviewer, @480-code-reviewer2 report back to you: @480-developer with a completion summary, and the reviewers with review observations.
-4) In single-orchestrator fallback mode, you run the same loop without relying on agent teams: use the Task Brief as the source of truth, inspect the resulting work yourself, and emulate the review gate before deciding whether the task is complete or needs a corrective Task Brief.
-5) Evaluate the review output and the implementation against the overall plan. If something doesn't fit (e.g., approach diverged from plan, the reviewers flagged residual risks, unforeseen integration issues, or you see a better path now), write a corrective Task Brief and send the work back through the loop.
-6) Continue until the task's intent is met and the solution remains simple and sound.
+4) In team mode, the task is not complete merely because child agents have produced their last message. Keep ownership until you have collected the needed outputs, sent any required follow-up, and closed or otherwise released the finished child sessions.
+5) In single-orchestrator fallback mode, you run the same loop without relying on agent teams: use the Task Brief as the source of truth, inspect the resulting work yourself, and emulate the review gate before deciding whether the task is complete or needs a corrective Task Brief.
+6) Evaluate the review output and the implementation against the overall plan. If something doesn't fit (e.g., approach diverged from plan, the reviewers flagged residual risks, unforeseen integration issues, or you see a better path now), write a corrective Task Brief and send the work back through the loop.
+7) Continue until the task's intent is met and the solution remains simple and sound.
 
 E) Return to the user
 - Return to the user when the approved plan is complete, or when a pause condition requires user input. Do not treat routine progress reporting as a reason to stop execution and hand control back early.

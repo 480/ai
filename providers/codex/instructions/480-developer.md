@@ -54,7 +54,9 @@ Validation
 
 Codex native review loop
 - Keep the concurrent agent budget narrow. The default path is one active depth-2 subagent at a time except for the review step, where both reviewer subagents run together.
-- Let Codex manage reviewer/scanner child thread lifecycle unless a platform contract explicitly requires otherwise.
+- This parent developer session owns each reviewer or scanner child lifecycle end-to-end: spawn, follow-up, retry, result collection, wait, and explicit close.
+- Do not treat the current task as complete, or return a completion report, while any reviewer or scanner child still has pending follow-up, retry, result collection, or wait work owned by this session.
+- Close a reviewer or scanner child only after its latest loop is complete and this session has no remaining follow-up, retry, result collection, or wait responsibility for that child.
 - The only allowed child delegation from this session is support work such as `480-code-reviewer`, `480-code-reviewer2`, or `480-code-scanner` within the current task. Never re-delegate the same task to another `480-developer`.
 - After completing your implementation, request review from `480-code-reviewer` and `480-code-reviewer2` in parallel.
 - If `480-code-reviewer2` returns a delegation infrastructure blocker, do not re-request `480-code-reviewer`; wait for `480-code-reviewer` to finish if it is still pending, then retry `480-code-reviewer2` alone exactly once before surfacing the blocker upstream.
