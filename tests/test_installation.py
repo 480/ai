@@ -6,6 +6,7 @@ import io
 import json
 import os
 import re
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -355,7 +356,7 @@ class InstallationTests(unittest.TestCase):
                 text,
             )
             self.assertIn(
-                "The only allowed child delegation from this session is support work such as `480-code-reviewer`, `480-code-reviewer2`, or `480-code-scanner` within the current task.",
+                "Do not spawn any subagents.",
                 text,
             )
         else:
@@ -961,7 +962,7 @@ manage_agents.install(target="codex", scope="user")
             self.assertEqual(merged["model"], "gpt-5.4")
             self.assertEqual(merged["profiles"]["default"]["approval_policy"], "never")
             self.assertTrue(merged["features"]["multi_agent"])
-            self.assertEqual(merged["agents"]["max_depth"], 2)
+            self.assertEqual(merged["agents"]["max_depth"], 1)
             self.assertEqual(merged["agents"]["max_threads"], 200)
             self.assertTrue((home / ".codex" / "agents" / "480-developer.toml").exists())
 
@@ -1509,7 +1510,7 @@ manage_agents.install(target="codex", scope="user")
             self.assertNotIn("default_activation_enabled", state)
             parsed_config = tomllib.loads(config_path.read_text(encoding="utf-8"))
             self.assertEqual(parsed_config["features"]["multi_agent"], True)
-            self.assertEqual(parsed_config["agents"]["max_depth"], 2)
+            self.assertEqual(parsed_config["agents"]["max_depth"], 1)
             self.assertEqual(parsed_config["agents"]["max_threads"], 200)
             installed_guidance = guidance_path.read_text(encoding="utf-8")
             self.assertIn(original_guidance, installed_guidance)
@@ -1604,11 +1605,34 @@ manage_agents.install(target="codex", scope="user")
             with self.patched_manage_agents_home(home):
                 self.run_command(home, "install", "--target", "codex", "--scope", "user")
 
+                codex_home = home / ".codex"
+                codex_home.mkdir(parents=True, exist_ok=True)
+                state_db = codex_home / "state_1.sqlite"
+                conn = sqlite3.connect(state_db)
+                try:
+                    conn.execute("CREATE TABLE threads (id TEXT PRIMARY KEY, model TEXT, agent_role TEXT)")
+                    conn.execute(
+                        "CREATE TABLE thread_spawn_edges (parent_thread_id TEXT NOT NULL, child_thread_id TEXT NOT NULL PRIMARY KEY, status TEXT NOT NULL)"
+                    )
+                    conn.execute("INSERT INTO threads (id, model, agent_role) VALUES (?, ?, ?)", ("thread-1", "gpt-5.4", None))
+                    conn.execute(
+                        "INSERT INTO threads (id, model, agent_role) VALUES (?, ?, ?)",
+                        ("child-1", "gpt-5.4", "480-developer"),
+                    )
+                    conn.execute(
+                        "INSERT INTO thread_spawn_edges (parent_thread_id, child_thread_id, status) VALUES (?, ?, ?)",
+                        ("thread-1", "child-1", "closed"),
+                    )
+                    conn.commit()
+                finally:
+                    conn.close()
+
                 agent_message = json.dumps(
                     {
                         "developer_role": "The current session is the `480-developer` role. It implements one task at a time from the given Task Brief and reports results to the parent session after iterating through review subagents when needed.",
                         "redelegated": False,
                         "waited_for_child": True,
+                        "closed_child": True,
                         "returned_before_child_complete": False,
                         "unexpected_agents": [],
                         "instruction_sources": ["~/.codex/AGENTS.md", "AGENTS.md"],
@@ -1619,6 +1643,39 @@ manage_agents.install(target="codex", scope="user")
                     [
                         json.dumps({"type": "thread.started", "thread_id": "thread-1"}),
                         json.dumps({"type": "turn.started"}),
+                        json.dumps(
+                            {
+                                "type": "item.completed",
+                                "item": {
+                                    "id": "item_spawn",
+                                    "type": "collab_tool_call",
+                                    "tool": "spawn_agent",
+                                    "receiver_thread_ids": ["child-1"],
+                                },
+                            }
+                        ),
+                        json.dumps(
+                            {
+                                "type": "item.completed",
+                                "item": {
+                                    "id": "item_wait",
+                                    "type": "collab_tool_call",
+                                    "tool": "wait",
+                                    "receiver_thread_ids": ["child-1"],
+                                },
+                            }
+                        ),
+                        json.dumps(
+                            {
+                                "type": "item.completed",
+                                "item": {
+                                    "id": "item_close",
+                                    "type": "collab_tool_call",
+                                    "tool": "close_agent",
+                                    "receiver_thread_ids": ["child-1"],
+                                },
+                            }
+                        ),
                         json.dumps(
                             {
                                 "type": "item.completed",
@@ -1986,7 +2043,7 @@ manage_agents.install(target="codex", scope="user")
 
             merged = tomllib.loads(config_path.read_text(encoding="utf-8"))
             self.assertTrue(merged["features"]["multi_agent"])
-            self.assertEqual(merged["agents"]["max_depth"], 2)
+            self.assertEqual(merged["agents"]["max_depth"], 1)
 
             self.run_command(home, "uninstall", "--target", "codex", "--scope", "user")
 
@@ -2026,7 +2083,7 @@ manage_agents.install(target="codex", scope="user")
             self.assertFalse(merged["features"]["unified_exec"])
             self.assertTrue(merged["features"]["multi_agent"])
             self.assertEqual(merged["agents"]["max_threads"], 200)
-            self.assertEqual(merged["agents"]["max_depth"], 2)
+            self.assertEqual(merged["agents"]["max_depth"], 1)
 
     def test_codex_user_install_with_desktop_notifications_restores_previous_notify_setting(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -2166,7 +2223,7 @@ manage_agents.install(target="codex", scope="user")
             config_text = config_path.read_text(encoding="utf-8")
             merged = tomllib.loads(config_text)
             self.assertTrue(merged["features"]["multi_agent"])
-            self.assertEqual(merged["agents"]["max_depth"], 2)
+            self.assertEqual(merged["agents"]["max_depth"], 1)
             self.assertEqual(merged["agents"]["max_threads"], 200)
             self.assertEqual(merged["model"], "gpt-5.4")
             self.assertEqual(config_text.count("features.multi_agent"), 1)
@@ -4004,7 +4061,7 @@ manage_agents.install(target="codex", scope="user")
             parsed_config = tomllib.loads(config_path.read_text(encoding="utf-8"))
             self.assertEqual(parsed_config["model"], "gpt-5.4")
             self.assertTrue(parsed_config["features"]["multi_agent"])
-            self.assertEqual(parsed_config["agents"]["max_depth"], 2)
+            self.assertEqual(parsed_config["agents"]["max_depth"], 1)
 
     def test_uninstall_removes_user_modified_managed_agent_and_preserves_new_default_agent(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -4907,7 +4964,7 @@ manage_agents.install(target="codex", scope="user")
         self.assertIn("project", codex_line.group(0))
         self.assertIn("AGENTS.md", codex_line.group(0))
         self.assertIn("config.toml", codex_line.group(0))
-        self.assertIn("agents.max_depth = 2", codex_line.group(0))
+        self.assertIn("agents.max_depth = 1", codex_line.group(0))
         self.assertIn("agents.max_threads = 200", codex_line.group(0))
         self.assertNotRegex(codex_line.group(0), r"480-architect.*enabled|enabled.*480-architect")
 
@@ -4944,7 +5001,7 @@ manage_agents.install(target="codex", scope="user")
         self.assertIn("Codex custom agents provide only the four subagents below.", codex_index)
         self.assertIn("`~/.codex/config.toml` or `<project>/.codex/config.toml`", codex_index)
         self.assertIn(
-            "Install preserves existing settings and only applies `features.multi_agent = true`, `agents.max_depth = 2`, and `agents.max_threads = 200`.",
+            "Install preserves existing settings and only applies `features.multi_agent = true`, `agents.max_depth = 1`, and `agents.max_threads = 200`.",
             codex_index,
         )
         self.assertIn(
@@ -4952,7 +5009,7 @@ manage_agents.install(target="codex", scope="user")
             codex_index,
         )
         self.assertIn("Codex install/uninstall also clean up legacy `480-architect.toml` and `480.toml` leftovers when present.", codex_index)
-        self.assertIn("The default delegation depth is 2:", codex_index)
+        self.assertIn("The default delegation depth is 1:", codex_index)
         self.assertIn("The default reviewer flow is parallel", codex_index)
         self.assertIn(
             "If `480-code-reviewer2` returns a delegation infrastructure blocker, do not re-request `480-code-reviewer`; wait for `480-code-reviewer` to finish if it is still pending, then retry `480-code-reviewer2` alone exactly once before surfacing the blocker upstream.",
@@ -5015,7 +5072,11 @@ manage_agents.install(target="codex", scope="user")
             codex_index,
         )
         self.assertIn(
-            "Have 480-developer request review from 480-code-reviewer and 480-code-reviewer2 in parallel, then return a completion report after both approvals.",
+            "Have 480-code-reviewer and 480-code-reviewer2 review in parallel, then return required changes or `Approved.`.",
+            codex_index,
+        )
+        self.assertIn(
+            "If changes are requested, have 480-developer apply them, then re-run the parallel review.",
             codex_index,
         )
         expected_gitignore_contract = (
@@ -5050,7 +5111,7 @@ manage_agents.install(target="codex", scope="user")
             close_line="After you spawn a child, keep the task active until you have collected the child's result, waited through any required follow-up, and explicitly closed or otherwise released finished child sessions.",
         )
         self.assertIn("Codex native delegation contract", codex_managed_guidance)
-        self.assertIn("`480-developer` (depth 1) -> reviewer/scanner subagents only when needed (depth 2)", codex_managed_guidance)
+        self.assertIn("root architect session (depth 0) -> subagents (depth 1) only", codex_managed_guidance)
         self.assertIn("Keep the concurrent agent budget narrow.", codex_managed_guidance)
         self.assertIn(
             "The parent session owns each child lifecycle end-to-end: spawn, follow-up, retry, result collection, wait, and explicit close.",
@@ -5104,41 +5165,22 @@ manage_agents.install(target="codex", scope="user")
             (REPO_ROOT / "providers" / "codex" / "instructions" / "480-developer.md").read_text(encoding="utf-8"),
             codex_style=True,
         )
-        self.assert_codex_developer_review_parse_contract(
-            (REPO_ROOT / "providers" / "codex" / "instructions" / "480-developer.md").read_text(encoding="utf-8")
-        )
 
         codex_developer = tomllib.loads((provider_agents_source_dir("codex") / "480-developer.toml").read_text(encoding="utf-8"))
-        self.assert_codex_lifecycle_contract(
-            codex_developer["developer_instructions"],
-            ownership_line="This parent developer session owns each reviewer or scanner child lifecycle end-to-end: spawn, follow-up, retry, result collection, wait, and explicit close.",
-            active_work_line="Do not treat the current task as complete, or return a completion report, while any reviewer or scanner child still has pending follow-up, retry, result collection, or wait work owned by this session.",
-            close_line="Close a reviewer or scanner child only after its latest loop is complete and this session has no remaining follow-up, retry, result collection, or wait responsibility for that child.",
-        )
         self.assert_developer_role_identity_contract(codex_developer["developer_instructions"], codex_style=True)
-        self.assert_codex_developer_review_parse_contract(codex_developer["developer_instructions"])
+        self.assertIn("Codex delegation safety", codex_developer["developer_instructions"])
+        self.assertIn(
+            "Do not spawn any subagents. The parent `480` session owns delegation, review, and child lifecycle management.",
+            codex_developer["developer_instructions"],
+        )
+        self.assertNotIn("After completing your implementation, request review from", codex_developer["developer_instructions"])
+        self.assertNotIn("Parse reviewer responses using the reviewer contract", codex_developer["developer_instructions"])
         self.assertIn(
             "Ignore any root-session-only architect planning or delegation rules inherited from the root `AGENTS.md`; they do not apply inside this spawned child session.",
             codex_developer["developer_instructions"],
         )
         self.assertIn(
-            "return only a structured blocker report to the current parent session or thread with `status`, `blocker_type`, `stage`, `reason`, `attempts`, and `evidence`.",
-            codex_developer["developer_instructions"],
-        )
-        self.assertIn(
-            "The parent architect may continue without pausing only if that low-risk fallback is applicable and an independent diff review finds no required changes.",
-            codex_developer["developer_instructions"],
-        )
-        self.assertIn(
-            "Any explicit change request from either reviewer is a real review finding and is never waived by this fallback.",
-            codex_developer["developer_instructions"],
-        )
-        self.assertIn(
             "Do not treat a progress update as a completion report or stop the implementation or review loop.",
-            codex_developer["developer_instructions"],
-        )
-        self.assertIn(
-            "If `480-code-reviewer2` returns a delegation infrastructure blocker, do not re-request `480-code-reviewer`; wait for `480-code-reviewer` to finish if it is still pending, then retry `480-code-reviewer2` alone exactly once before surfacing the blocker upstream.",
             codex_developer["developer_instructions"],
         )
         claude_developer = (provider_agents_source_dir("claude") / "480-developer.md").read_text(encoding="utf-8")
@@ -5154,7 +5196,7 @@ manage_agents.install(target="codex", scope="user")
         codex_reviewer = tomllib.loads((provider_agents_source_dir("codex") / "480-code-reviewer.toml").read_text(encoding="utf-8"))
         self.assert_codex_close_contract(
             codex_reviewer["developer_instructions"],
-            parent_label="`480-developer` subagent",
+            parent_label="session that spawned this reviewer",
         )
         self.assertIn(
             "A direct change request is a real review finding and must not be described as an infrastructure blocker.",
@@ -5169,7 +5211,7 @@ manage_agents.install(target="codex", scope="user")
         codex_reviewer2 = tomllib.loads((provider_agents_source_dir("codex") / "480-code-reviewer2.toml").read_text(encoding="utf-8"))
         self.assert_codex_close_contract(
             codex_reviewer2["developer_instructions"],
-            parent_label="`480-developer` subagent",
+            parent_label="session that spawned this reviewer",
         )
         self.assertIn(
             "A direct change request is a real review finding and must not be described as an infrastructure blocker.",
