@@ -962,6 +962,7 @@ manage_agents.install(target="codex", scope="user")
             self.assertEqual(merged["profiles"]["default"]["approval_policy"], "never")
             self.assertTrue(merged["features"]["multi_agent"])
             self.assertEqual(merged["agents"]["max_depth"], 2)
+            self.assertEqual(merged["agents"]["max_threads"], 200)
             self.assertTrue((home / ".codex" / "agents" / "480-developer.toml").exists())
 
     def test_claude_user_install_without_activate_default_preserves_agent_setting(self) -> None:
@@ -1509,6 +1510,7 @@ manage_agents.install(target="codex", scope="user")
             parsed_config = tomllib.loads(config_path.read_text(encoding="utf-8"))
             self.assertEqual(parsed_config["features"]["multi_agent"], True)
             self.assertEqual(parsed_config["agents"]["max_depth"], 2)
+            self.assertEqual(parsed_config["agents"]["max_threads"], 200)
             installed_guidance = guidance_path.read_text(encoding="utf-8")
             self.assertIn(original_guidance, installed_guidance)
             self.assertIn(installer_core.CODEX_MANAGED_AGENTS_START, installed_guidance)
@@ -1606,6 +1608,10 @@ manage_agents.install(target="codex", scope="user")
                     {
                         "developer_role": "The current session is the `480-developer` role. It implements one task at a time from the given Task Brief and reports results to the parent session after iterating through review subagents when needed.",
                         "redelegated": False,
+                        "waited_for_child": True,
+                        "returned_before_child_complete": False,
+                        "unexpected_agents": [],
+                        "instruction_sources": ["~/.codex/AGENTS.md", "AGENTS.md"],
                         "notes": "Current role is 480-developer.",
                     }
                 )
@@ -1644,10 +1650,11 @@ manage_agents.install(target="codex", scope="user")
             self.assertEqual(result["final_classification"], "success")
             self.assertEqual(result["install_state"]["status"], "ok")
             self.assertEqual(result["cleanup_result"]["status"], "ok")
-            self.assertEqual(result["general_session_validation"]["status"], "not_run")
-            self.assertIsNone(result["general_session_validation"]["developer_role"])
-            self.assertIsNone(result["general_session_validation"]["redelegated"])
-            self.assertIn("not run by automated verify", result["general_session_validation"]["notes"])
+            self.assertEqual(result["general_session_validation"]["status"], "ok")
+            self.assertEqual(result["general_session_validation"]["mismatches"], [])
+            self.assertEqual(result["general_session_validation"]["redelegated"], False)
+            self.assertEqual(result["general_session_validation"]["waited_for_child"], True)
+            self.assertEqual(result["general_session_validation"]["returned_before_child_complete"], False)
             self.assertEqual(result["exec_path_result"]["status"], "ok")
             self.assertIn("agent_outputs", result["install_state"])
             self.assertIn("config", result["install_state"])
@@ -1694,7 +1701,7 @@ manage_agents.install(target="codex", scope="user")
             self.assertEqual(result["install_state"]["status"], "ok")
             self.assertEqual(result["cleanup_result"]["status"], "ok")
             self.assertEqual(result["exec_path_result"]["status"], "blocked")
-            self.assertEqual(result["general_session_validation"]["status"], "not_run")
+            self.assertEqual(result["general_session_validation"]["status"], "blocked")
             self.assertEqual(result["final_classification"], "exec_path_limitation")
 
     def test_codex_verify_keeps_hard_exec_path_failures_as_platform_blockers(self) -> None:
@@ -2018,7 +2025,7 @@ manage_agents.install(target="codex", scope="user")
             self.assertEqual(merged["model"], "gpt-5.4")
             self.assertFalse(merged["features"]["unified_exec"])
             self.assertTrue(merged["features"]["multi_agent"])
-            self.assertEqual(merged["agents"]["max_threads"], 100)
+            self.assertEqual(merged["agents"]["max_threads"], 200)
             self.assertEqual(merged["agents"]["max_depth"], 2)
 
     def test_codex_user_install_with_desktop_notifications_restores_previous_notify_setting(self) -> None:
@@ -2160,7 +2167,7 @@ manage_agents.install(target="codex", scope="user")
             merged = tomllib.loads(config_text)
             self.assertTrue(merged["features"]["multi_agent"])
             self.assertEqual(merged["agents"]["max_depth"], 2)
-            self.assertEqual(merged["agents"]["max_threads"], 100)
+            self.assertEqual(merged["agents"]["max_threads"], 200)
             self.assertEqual(merged["model"], "gpt-5.4")
             self.assertEqual(config_text.count("features.multi_agent"), 1)
             self.assertEqual(config_text.count("agents.max_depth"), 1)
@@ -4901,6 +4908,7 @@ manage_agents.install(target="codex", scope="user")
         self.assertIn("AGENTS.md", codex_line.group(0))
         self.assertIn("config.toml", codex_line.group(0))
         self.assertIn("agents.max_depth = 2", codex_line.group(0))
+        self.assertIn("agents.max_threads = 200", codex_line.group(0))
         self.assertNotRegex(codex_line.group(0), r"480-architect.*enabled|enabled.*480-architect")
 
     def test_opencode_index_and_architecture_docs_match_current_bootstrap_behavior(self) -> None:
@@ -4935,8 +4943,14 @@ manage_agents.install(target="codex", scope="user")
         self.assertIn("there is no separate architect custom agent", codex_index)
         self.assertIn("Codex custom agents provide only the four subagents below.", codex_index)
         self.assertIn("`~/.codex/config.toml` or `<project>/.codex/config.toml`", codex_index)
-        self.assertIn("Install preserves existing settings and only applies `features.multi_agent = true` and `agents.max_depth = 2`.", codex_index)
-        self.assertIn("This architect workflow is for the root Codex session only", codex_index)
+        self.assertIn(
+            "Install preserves existing settings and only applies `features.multi_agent = true`, `agents.max_depth = 2`, and `agents.max_threads = 200`.",
+            codex_index,
+        )
+        self.assertIn(
+            "This architect workflow is for the root Codex session only. Spawned `480-developer`/reviewer/scanner sessions must ignore those architect-only rules and follow their own custom agent instructions.",
+            codex_index,
+        )
         self.assertIn("Codex install/uninstall also clean up legacy `480-architect.toml` and `480.toml` leftovers when present.", codex_index)
         self.assertIn("The default delegation depth is 2:", codex_index)
         self.assertIn("The default reviewer flow is parallel", codex_index)
@@ -4976,7 +4990,22 @@ manage_agents.install(target="codex", scope="user")
         self.assertIn("Do not make `new session` or `exception allowed` the default path for users.", codex_index)
         self.assertIn("Existing user content is preserved and only the 480ai managed block is appended.", codex_index)
         self.assertIn("Uninstall removes only the 480ai managed block.", codex_index)
-        self.assertIn("Architect rules apply only to the root session, and subagents follow their own custom agent instructions.", codex_index)
+        self.assertIn(
+            "Architect rules apply only to the root session, and spawned subagents explicitly ignore those architect-only rules in favor of their own custom agent instructions.",
+            codex_index,
+        )
+        self.assertIn(
+            "This architect workflow applies only to the root Codex session that starts from the main `AGENTS.md` instruction chain and directly coordinates with the user.",
+            codex_architect,
+        )
+        self.assertIn(
+            "If this session was spawned as a child custom agent, these architect-only requirements are inherited background only and must not be treated as the child's operating contract.",
+            codex_architect,
+        )
+        self.assertIn(
+            "If this session was spawned as a child custom agent, these architect-only requirements are inherited background only and must not be treated as the child's operating contract.",
+            codex_managed_guidance,
+        )
         self.assertIn(
             "Plan the next work for docs/480ai/example-topic/001-example-task.md.",
             codex_index,
@@ -5089,6 +5118,10 @@ manage_agents.install(target="codex", scope="user")
         self.assert_developer_role_identity_contract(codex_developer["developer_instructions"], codex_style=True)
         self.assert_codex_developer_review_parse_contract(codex_developer["developer_instructions"])
         self.assertIn(
+            "Ignore any root-session-only architect planning or delegation rules inherited from the root `AGENTS.md`; they do not apply inside this spawned child session.",
+            codex_developer["developer_instructions"],
+        )
+        self.assertIn(
             "return only a structured blocker report to the current parent session or thread with `status`, `blocker_type`, `stage`, `reason`, `attempts`, and `evidence`.",
             codex_developer["developer_instructions"],
         )
@@ -5127,6 +5160,10 @@ manage_agents.install(target="codex", scope="user")
             "A direct change request is a real review finding and must not be described as an infrastructure blocker.",
             codex_reviewer["developer_instructions"],
         )
+        self.assertIn(
+            "Ignore any root-session-only architect planning or delegation rules inherited from the root `AGENTS.md`; they do not apply in this reviewer child session.",
+            codex_reviewer["developer_instructions"],
+        )
         self.assert_codex_reviewer_stays_in_thread(codex_reviewer["developer_instructions"])
 
         codex_reviewer2 = tomllib.loads((provider_agents_source_dir("codex") / "480-code-reviewer2.toml").read_text(encoding="utf-8"))
@@ -5136,6 +5173,10 @@ manage_agents.install(target="codex", scope="user")
         )
         self.assertIn(
             "A direct change request is a real review finding and must not be described as an infrastructure blocker.",
+            codex_reviewer2["developer_instructions"],
+        )
+        self.assertIn(
+            "Ignore any root-session-only architect planning or delegation rules inherited from the root `AGENTS.md`; they do not apply in this reviewer child session.",
             codex_reviewer2["developer_instructions"],
         )
         self.assert_codex_reviewer_stays_in_thread(codex_reviewer2["developer_instructions"])
@@ -5151,6 +5192,10 @@ manage_agents.install(target="codex", scope="user")
         self.assertIn("Do not treat this scanner child thread as closable while follow-up, retry, or result wait work is still pending.", codex_scanner["developer_instructions"])
         self.assertIn(
             "return only a structured blocker report to the current parent session or thread instead of proposing `new session` or `exception allowed` as the default path.",
+            codex_scanner["developer_instructions"],
+        )
+        self.assertIn(
+            "Ignore any root-session-only architect planning or delegation rules inherited from the root `AGENTS.md`; they do not apply in this scanner child session.",
             codex_scanner["developer_instructions"],
         )
         self.assertIn("treat that target as the primary workspace hint", codex_scanner["developer_instructions"])
@@ -5184,19 +5229,23 @@ manage_agents.install(target="codex", scope="user")
         agents_index = (REPO_ROOT / "providers" / "codex" / "AGENTS.md").read_text(encoding="utf-8")
 
         self.assertIn(
-            "- `480-developer`\n  - maps from: `480-developer`\n  - file: `providers/codex/agents/480-developer.toml`\n  - model: `gpt-5.4-mini`\n  - reasoning: `medium`",
+            "Checked-in Codex custom agent TOMLs omit `model`, so spawned sessions inherit the parent session's model by default.",
             agents_index,
         )
         self.assertIn(
-            "- `480-code-reviewer`\n  - maps from: `480-code-reviewer`\n  - file: `providers/codex/agents/480-code-reviewer.toml`\n  - model: `gpt-5.4`\n  - reasoning: `high`",
+            "- `480-developer`\n  - maps from: `480-developer`\n  - file: `providers/codex/agents/480-developer.toml`\n  - reasoning: `medium`",
             agents_index,
         )
         self.assertIn(
-            "- `480-code-reviewer2`\n  - maps from: `480-code-reviewer2`\n  - file: `providers/codex/agents/480-code-reviewer2.toml`\n  - model: `gpt-5.4`\n  - reasoning: `medium`",
+            "- `480-code-reviewer`\n  - maps from: `480-code-reviewer`\n  - file: `providers/codex/agents/480-code-reviewer.toml`\n  - reasoning: `high`",
             agents_index,
         )
         self.assertIn(
-            "- `480-code-scanner`\n  - maps from: `480-code-scanner`\n  - file: `providers/codex/agents/480-code-scanner.toml`\n  - model: `gpt-5.3-codex-spark`\n  - reasoning: `low`",
+            "- `480-code-reviewer2`\n  - maps from: `480-code-reviewer2`\n  - file: `providers/codex/agents/480-code-reviewer2.toml`\n  - reasoning: `medium`",
+            agents_index,
+        )
+        self.assertIn(
+            "- `480-code-scanner`\n  - maps from: `480-code-scanner`\n  - file: `providers/codex/agents/480-code-scanner.toml`\n  - reasoning: `low`",
             agents_index,
         )
 
@@ -5242,7 +5291,7 @@ manage_agents.install(target="codex", scope="user")
                     expected_instructions += "\n"
                 self.assertEqual(parsed["name"], codex_name)
                 self.assertEqual(parsed["description"], spec.description)
-                self.assertEqual(parsed["model"], codex_model_profile.model)
+                self.assertNotIn("model", parsed)
                 self.assertEqual(parsed["model_reasoning_effort"], codex_model_profile.effort)
                 self.assertEqual(parsed["sandbox_mode"], codex_metadata["sandbox_mode"])
                 self.assertNotIn("nickname_candidates", parsed)
@@ -5578,16 +5627,16 @@ manage_agents.install(target="codex", scope="user")
         codex_reviewer2 = tomllib.loads(
             render_agents.render_codex_agent(specs["480-code-reviewer2"], codex_name_map)
         )
-        self.assertEqual(codex_reviewer2["model"], "gpt-5.4")
+        self.assertNotIn("model", codex_reviewer2)
         self.assertEqual(codex_reviewer2["model_reasoning_effort"], "medium")
 
-    def test_codex_reviewer_contract_and_model_alignment_are_pinned_in_sources_and_rendered_outputs(self) -> None:
+    def test_codex_reviewer_contract_and_model_alignment_are_inherited_in_sources_and_rendered_outputs(self) -> None:
         specs = {spec.identifier: spec for spec in agent_bundle.load_bundle()}
         codex_name_map = render_agents._codex_name_map(tuple(specs.values()))
 
-        for agent_id, expected_model, expected_effort in (
-            ("480-code-reviewer", "gpt-5.4", "high"),
-            ("480-code-reviewer2", "gpt-5.4", "medium"),
+        for agent_id, expected_effort in (
+            ("480-code-reviewer", "high"),
+            ("480-code-reviewer2", "medium"),
         ):
             common_source_instruction = (
                 REPO_ROOT / "bundles" / "common" / "instructions" / f"{agent_id}.md"
@@ -5604,16 +5653,16 @@ manage_agents.install(target="codex", scope="user")
                 provider_agents_source_dir("codex") / f"{agent_id}.toml"
             ).read_text(encoding="utf-8")
             checked_in_agent = tomllib.loads(checked_in_toml)
-            self.assertEqual(checked_in_agent["model"], expected_model)
             self.assertEqual(checked_in_agent["model_reasoning_effort"], expected_effort)
+            self.assertNotIn("model", checked_in_agent)
             self.assert_reviewer_throughput_contract(checked_in_agent["developer_instructions"])
             self.assert_codex_reviewer_feedback_contract(checked_in_agent["developer_instructions"])
 
             rendered_agent = tomllib.loads(
                 render_agents.render_codex_agent(specs[agent_id], codex_name_map)
             )
-            self.assertEqual(rendered_agent["model"], expected_model)
             self.assertEqual(rendered_agent["model_reasoning_effort"], expected_effort)
+            self.assertNotIn("model", rendered_agent)
             self.assertEqual(rendered_agent["developer_instructions"], checked_in_agent["developer_instructions"])
             self.assert_reviewer_throughput_contract(rendered_agent["developer_instructions"])
             self.assert_codex_reviewer_feedback_contract(rendered_agent["developer_instructions"])

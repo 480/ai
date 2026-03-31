@@ -178,10 +178,11 @@ def render_codex_agent(
     lines = [
         f"name = {_render_toml_string(name, field_name='name')}",
         f"description = {_render_toml_string(spec.description, field_name='description')}",
-        f"model = {_render_toml_string(model_profile.model, field_name='model')}",
         f"model_reasoning_effort = {_render_toml_string(model_profile.effort, field_name='model_reasoning_effort')}",
         f"sandbox_mode = {_render_toml_string(sandbox_mode, field_name='sandbox_mode')}",
     ]
+    if model_selection is not None:
+        lines.insert(2, f"model = {_render_toml_string(model_profile.model, field_name='model')}")
     lines.append(
         f"developer_instructions = {_render_toml_multiline_literal(body, field_name='developer_instructions')}"
     )
@@ -388,7 +389,16 @@ def render_codex_agents_index(
         codex_name = codex_name_map[spec.identifier]
         lines.append(f"- `{spec.identifier}` -> `{codex_name}` (`providers/codex/agents/{codex_name}.toml`)")
 
-    lines.extend(["", "## Custom agents", "", "Codex custom agents provide only the four subagents below.", ""])
+    lines.extend(
+        [
+            "",
+            "## Custom agents",
+            "",
+            "Codex custom agents provide only the four subagents below.",
+            "Checked-in Codex custom agent TOMLs omit `model`, so spawned sessions inherit the parent session's model by default.",
+            "",
+        ]
+    )
     for spec in subagents:
         model_profile = _model_profile_for_provider("codex", spec, model_selection)
         metadata = spec.metadata_for_target("codex")
@@ -397,7 +407,6 @@ def render_codex_agents_index(
                 f"- `{codex_name_map[spec.identifier]}`",
                 f"  - maps from: `{spec.identifier}`",
                 f"  - file: `providers/codex/agents/{codex_name_map[spec.identifier]}.toml`",
-                f"  - model: `{model_profile.model}`",
                 f"  - reasoning: `{model_profile.effort}`",
                 f"  - sandbox: `{metadata['sandbox_mode']}`",
                 "",
@@ -411,10 +420,10 @@ def render_codex_agents_index(
             "Install files are copied to `~/.codex/agents/` or `<project>/.codex/agents/`.",
             "User scope adds the 480ai managed block to `~/.codex/AGENTS.md`; project scope adds it to the repository root `AGENTS.md`.",
             "Codex config follows the official contract and applies only minimal merges to `~/.codex/config.toml` or `<project>/.codex/config.toml`.",
-            "Install preserves existing settings and only applies `features.multi_agent = true` and `agents.max_depth = 2`.",
+            "Install preserves existing settings and only applies `features.multi_agent = true`, `agents.max_depth = 2`, and `agents.max_threads = 200`.",
             "Codex CLI uses the `name` field in each TOML as the custom agent name.",
             "The root `AGENTS.md` 480ai managed block uses the architect main prompt body verbatim.",
-            "This architect workflow is for the root Codex session only, and the `480-developer`/reviewer/scanner subagents follow their own custom agent instructions.",
+            "This architect workflow is for the root Codex session only. Spawned `480-developer`/reviewer/scanner sessions must ignore those architect-only rules and follow their own custom agent instructions.",
             "Existing user content is preserved and only the 480ai managed block is appended.",
             "Reinstall replaces the existing 480ai managed block rather than duplicating it.",
             "Uninstall removes only the 480ai managed block.",
@@ -458,7 +467,7 @@ def render_codex_agents_index(
             "## Scope notes",
             "",
             "The Codex CLI installer manages only the custom agents and the 480ai managed AGENTS block.",
-            "Architect rules apply only to the root session, and subagents follow their own custom agent instructions.",
+            "Architect rules apply only to the root session, and spawned subagents explicitly ignore those architect-only rules in favor of their own custom agent instructions.",
             "Do not touch user-written content or any AGENTS.md content outside the 480ai managed block.",
             "",
             "## Source of truth",

@@ -97,9 +97,14 @@ class InstallOptions:
 
 
 CODEX_NOOP_VALIDATION_PROMPT = (
-    "Spawn `480-developer` for a no-op validation only. Do not edit files. "
-    "Have the child inspect its current role and report only JSON with: "
-    '{"developer_role":"...","redelegated":false,"notes":"..."}.'
+    "Spawn exactly one `480-developer` for a no-op validation only. Do not edit files. "
+    "Wait for the child to finish before responding. Do not redelegate to other agents. "
+    "Have the child inspect its current role. "
+    "Also list the instruction sources loaded by this session (best effort). "
+    "Return only a single JSON object with keys: "
+    "`developer_role` (string), `redelegated` (boolean), `waited_for_child` (boolean), "
+    "`returned_before_child_complete` (boolean), `unexpected_agents` (array of strings), "
+    "`instruction_sources` (array of strings), `notes` (string)."
 )
 
 
@@ -1385,6 +1390,10 @@ def _run_codex_noop_validation(repo_root: Path) -> dict[str, object]:
 
     developer_role = parsed_message.get("developer_role")
     redelegated = parsed_message.get("redelegated")
+    waited_for_child = parsed_message.get("waited_for_child")
+    returned_before_child_complete = parsed_message.get("returned_before_child_complete")
+    unexpected_agents = parsed_message.get("unexpected_agents")
+    instruction_sources = parsed_message.get("instruction_sources")
     notes = parsed_message.get("notes")
     status = "ok" if _codex_noop_validation_reports_developer_role(developer_role) and redelegated is False else "blocked"
     return {
@@ -1393,6 +1402,10 @@ def _run_codex_noop_validation(repo_root: Path) -> dict[str, object]:
         "returncode": completed.returncode,
         "developer_role": developer_role,
         "redelegated": redelegated,
+        "waited_for_child": waited_for_child,
+        "returned_before_child_complete": returned_before_child_complete,
+        "unexpected_agents": unexpected_agents,
+        "instruction_sources": instruction_sources,
         "notes": notes,
         "raw_message": raw_message,
     }
@@ -1418,10 +1431,15 @@ def _classify_verify_results(results: dict[str, dict[str, object]]) -> str:
 
 def _build_general_session_validation() -> dict[str, object]:
     return {
-        "status": "not_run",
+        "status": "blocked",
+        "mismatches": ["missing:exec_path_result"],
         "developer_role": None,
         "redelegated": None,
-        "notes": "Separate Codex session validation is documented but not run by automated verify.",
+        "waited_for_child": None,
+        "returned_before_child_complete": None,
+        "unexpected_agents": None,
+        "instruction_sources": None,
+        "notes": "General session validation requires Codex exec output.",
         "raw_message": None,
     }
 
@@ -1442,7 +1460,7 @@ def verify(target: str = DEFAULT_VERIFY_TARGET, scope: str = DEFAULT_VERIFY_SCOP
 
     cleanup_result = _verify_codex_cleanup(resolved_target)
     exec_path_result = _run_codex_noop_validation(REPO_ROOT)
-    general_session_validation = _build_general_session_validation()
+    general_session_validation = _build_general_session_validation_from_exec_result(exec_path_result)
 
     results = {
         "install_state": install_state,
@@ -1452,6 +1470,75 @@ def verify(target: str = DEFAULT_VERIFY_TARGET, scope: str = DEFAULT_VERIFY_SCOP
     }
     results["final_classification"] = _classify_verify_results(results)
     return results
+
+
+def _normalize_str_list(value: object) -> list[str] | None:
+    if value is None:
+        return None
+    if not isinstance(value, list):
+        return None
+    items: list[str] = []
+    for item in value:
+        if not isinstance(item, str):
+            return None
+        items.append(item)
+    return items
+
+
+def _build_general_session_validation_from_exec_result(exec_path_result: dict[str, object]) -> dict[str, object]:
+    if exec_path_result.get("status") != "ok":
+        return {
+            "status": "blocked",
+            "mismatches": ["skipped:exec_path_result_blocked"],
+            "developer_role": exec_path_result.get("developer_role"),
+            "redelegated": exec_path_result.get("redelegated"),
+            "waited_for_child": exec_path_result.get("waited_for_child"),
+            "returned_before_child_complete": exec_path_result.get("returned_before_child_complete"),
+            "unexpected_agents": exec_path_result.get("unexpected_agents"),
+            "instruction_sources": exec_path_result.get("instruction_sources"),
+            "notes": "Skipped because Codex exec path validation did not succeed.",
+            "raw_message": exec_path_result.get("raw_message"),
+        }
+
+    mismatches: list[str] = []
+    developer_role = exec_path_result.get("developer_role")
+    redelegated = exec_path_result.get("redelegated")
+    waited_for_child = exec_path_result.get("waited_for_child")
+    returned_before_child_complete = exec_path_result.get("returned_before_child_complete")
+    unexpected_agents = _normalize_str_list(exec_path_result.get("unexpected_agents"))
+    instruction_sources = _normalize_str_list(exec_path_result.get("instruction_sources"))
+    notes = exec_path_result.get("notes")
+    raw_message = exec_path_result.get("raw_message")
+
+    if not _codex_noop_validation_reports_developer_role(developer_role):
+        mismatches.append("developer_role:missing-or-unexpected")
+    if redelegated is not False:
+        mismatches.append(f"redelegated:expected=false,actual={redelegated!r}")
+    if waited_for_child is not True:
+        mismatches.append(f"waited_for_child:expected=true,actual={waited_for_child!r}")
+    if returned_before_child_complete is not False:
+        mismatches.append(
+            f"returned_before_child_complete:expected=false,actual={returned_before_child_complete!r}"
+        )
+    if unexpected_agents is None:
+        mismatches.append("unexpected_agents:missing-or-invalid")
+    elif unexpected_agents:
+        mismatches.append(f"unexpected_agents:expected_empty,actual={unexpected_agents!r}")
+    if instruction_sources is None:
+        mismatches.append("instruction_sources:missing-or-invalid")
+
+    return {
+        "status": "ok" if not mismatches else "blocked",
+        "mismatches": mismatches,
+        "developer_role": developer_role,
+        "redelegated": redelegated,
+        "waited_for_child": waited_for_child,
+        "returned_before_child_complete": returned_before_child_complete,
+        "unexpected_agents": unexpected_agents,
+        "instruction_sources": instruction_sources,
+        "notes": notes,
+        "raw_message": raw_message,
+    }
 
 
 def install(
