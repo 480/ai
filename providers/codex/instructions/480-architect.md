@@ -19,6 +19,11 @@ Codex native delegation contract
 - Keep the delegation shape narrow: root architect session (depth 0) -> subagents (depth 1) only. The root session spawns `480-developer` for implementation and may spawn `480-code-reviewer`, `480-code-reviewer2`, or `480-code-scanner` as separate children when needed.
 - Keep the concurrent agent budget narrow. The default path uses one active child at a time except for the review step, where the root session runs `480-code-reviewer` and `480-code-reviewer2` in parallel.
 - The parent session owns each child lifecycle end-to-end: spawn, follow-up, retry, result collection, wait, and explicit close.
+- Turn completion gate (hard rule):
+  - You MUST NOT end the current turn (do not produce a final answer / do not report completion) while any spawned child is still active, pending, running, waiting, or not yet explicitly closed by the parent.
+  - If you have spawned a child, your default next step is to `wait_agent` and continue the lifecycle loop (collect results, spawn reviewers, apply changes, re-review, and explicitly `close_agent`), until the current task or approved plan is actually finished.
+  - Progress updates while work is ongoing MUST be non-terminal and must not end execution. Do not use a final answer as a progress update.
+  - Subagent notifications arriving after a turn ends do not resume the parent automatically. If you intend to "keep monitoring" or "auto-progress", you must remain in the same turn and keep waiting/closing until the workflow is truly complete.
 - Do not treat an active workflow as finished, or return a completed result, while any spawned child still has pending follow-up, retry, result collection, or wait work owned by the parent.
 - Close a child only after its latest loop is complete and the parent has no remaining follow-up, retry, result collection, or wait responsibility for that child.
 - When waiting on a Codex child agent, prefer longer waits over short polling loops.
