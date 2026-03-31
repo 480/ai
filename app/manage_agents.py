@@ -6,10 +6,12 @@ import argparse
 import json
 import os
 import shutil
+import sqlite3
 import subprocess
 import sys
 import tempfile
 import textwrap
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TextIO
@@ -97,13 +99,13 @@ class InstallOptions:
 
 
 CODEX_NOOP_VALIDATION_PROMPT = (
-    "Spawn exactly one `480-developer` for a no-op validation only. Do not edit files. "
-    "Wait for the child to finish before responding. Do not redelegate to other agents. "
+    "Spawn exactly one `480-developer` with `fork_context=false` for a no-op validation only. Do not edit files. "
+    "Wait for the child to finish before responding. Then close the child agent. Do not redelegate to other agents. "
     "Have the child inspect its current role. "
     "Also list the instruction sources loaded by this session (best effort). "
     "Return only a single JSON object with keys: "
     "`developer_role` (string), `redelegated` (boolean), `waited_for_child` (boolean), "
-    "`returned_before_child_complete` (boolean), `unexpected_agents` (array of strings), "
+    "`closed_child` (boolean), `returned_before_child_complete` (boolean), `unexpected_agents` (array of strings), "
     "`instruction_sources` (array of strings), `notes` (string)."
 )
 
@@ -1353,8 +1355,7 @@ def _run_codex_noop_validation(repo_root: Path) -> dict[str, object]:
             "stderr": completed.stderr.strip(),
         }
 
-    parsed_message: dict[str, object] | None = None
-    raw_message: str | None = None
+    events: list[dict[str, object]] = []
     for line in completed.stdout.splitlines():
         line = line.strip()
         if not line:
@@ -1363,11 +1364,44 @@ def _run_codex_noop_validation(repo_root: Path) -> dict[str, object]:
             event = json.loads(line)
         except json.JSONDecodeError:
             continue
+        if isinstance(event, dict):
+            events.append(event)
+
+    thread_id: str | None = None
+    spawned_thread_ids: list[str] = []
+    waited_thread_ids: list[str] = []
+    closed_thread_ids: list[str] = []
+    parsed_message: dict[str, object] | None = None
+    raw_message: str | None = None
+    for event in events:
+        if event.get("type") == "thread.started":
+            candidate_thread_id = event.get("thread_id")
+            if isinstance(candidate_thread_id, str) and candidate_thread_id:
+                thread_id = candidate_thread_id
+            continue
+
         if event.get("type") != "item.completed":
             continue
         item = event.get("item")
-        if not isinstance(item, dict) or item.get("type") != "agent_message":
+        if not isinstance(item, dict):
             continue
+
+        if item.get("type") == "collab_tool_call":
+            tool = item.get("tool")
+            receiver_thread_ids = item.get("receiver_thread_ids")
+            if isinstance(receiver_thread_ids, list):
+                normalized_receiver_ids = [entry for entry in receiver_thread_ids if isinstance(entry, str) and entry]
+                if tool == "spawn_agent":
+                    spawned_thread_ids.extend(normalized_receiver_ids)
+                elif tool == "wait":
+                    waited_thread_ids.extend(normalized_receiver_ids)
+                elif tool == "close_agent":
+                    closed_thread_ids.extend(normalized_receiver_ids)
+            continue
+
+        if item.get("type") != "agent_message":
+            continue
+
         raw_message = item.get("text") if isinstance(item.get("text"), str) else None
         if raw_message is None:
             continue
@@ -1391,6 +1425,7 @@ def _run_codex_noop_validation(repo_root: Path) -> dict[str, object]:
     developer_role = parsed_message.get("developer_role")
     redelegated = parsed_message.get("redelegated")
     waited_for_child = parsed_message.get("waited_for_child")
+    closed_child = parsed_message.get("closed_child")
     returned_before_child_complete = parsed_message.get("returned_before_child_complete")
     unexpected_agents = parsed_message.get("unexpected_agents")
     instruction_sources = parsed_message.get("instruction_sources")
@@ -1400,9 +1435,14 @@ def _run_codex_noop_validation(repo_root: Path) -> dict[str, object]:
         "status": status,
         "command": command,
         "returncode": completed.returncode,
+        "thread_id": thread_id,
+        "spawned_thread_ids": sorted({*spawned_thread_ids}),
+        "waited_thread_ids": sorted({*waited_thread_ids}),
+        "closed_thread_ids": sorted({*closed_thread_ids}),
         "developer_role": developer_role,
         "redelegated": redelegated,
         "waited_for_child": waited_for_child,
+        "closed_child": closed_child,
         "returned_before_child_complete": returned_before_child_complete,
         "unexpected_agents": unexpected_agents,
         "instruction_sources": instruction_sources,
@@ -1485,6 +1525,17 @@ def _normalize_str_list(value: object) -> list[str] | None:
     return items
 
 
+def _detect_codex_state_db_path() -> Path | None:
+    codex_home = Path.home() / ".codex"
+    if not codex_home.exists():
+        return None
+
+    candidates = list(codex_home.glob("state_*.sqlite"))
+    if not candidates:
+        return None
+    return max(candidates, key=lambda path: path.stat().st_mtime)
+
+
 def _build_general_session_validation_from_exec_result(exec_path_result: dict[str, object]) -> dict[str, object]:
     if exec_path_result.get("status") != "ok":
         return {
@@ -1493,6 +1544,7 @@ def _build_general_session_validation_from_exec_result(exec_path_result: dict[st
             "developer_role": exec_path_result.get("developer_role"),
             "redelegated": exec_path_result.get("redelegated"),
             "waited_for_child": exec_path_result.get("waited_for_child"),
+            "closed_child": exec_path_result.get("closed_child"),
             "returned_before_child_complete": exec_path_result.get("returned_before_child_complete"),
             "unexpected_agents": exec_path_result.get("unexpected_agents"),
             "instruction_sources": exec_path_result.get("instruction_sources"),
@@ -1504,11 +1556,16 @@ def _build_general_session_validation_from_exec_result(exec_path_result: dict[st
     developer_role = exec_path_result.get("developer_role")
     redelegated = exec_path_result.get("redelegated")
     waited_for_child = exec_path_result.get("waited_for_child")
+    closed_child = exec_path_result.get("closed_child")
     returned_before_child_complete = exec_path_result.get("returned_before_child_complete")
     unexpected_agents = _normalize_str_list(exec_path_result.get("unexpected_agents"))
     instruction_sources = _normalize_str_list(exec_path_result.get("instruction_sources"))
     notes = exec_path_result.get("notes")
     raw_message = exec_path_result.get("raw_message")
+    thread_id = exec_path_result.get("thread_id")
+    spawned_thread_ids = _normalize_str_list(exec_path_result.get("spawned_thread_ids"))
+    waited_thread_ids = _normalize_str_list(exec_path_result.get("waited_thread_ids"))
+    closed_thread_ids = _normalize_str_list(exec_path_result.get("closed_thread_ids"))
 
     if not _codex_noop_validation_reports_developer_role(developer_role):
         mismatches.append("developer_role:missing-or-unexpected")
@@ -1516,6 +1573,8 @@ def _build_general_session_validation_from_exec_result(exec_path_result: dict[st
         mismatches.append(f"redelegated:expected=false,actual={redelegated!r}")
     if waited_for_child is not True:
         mismatches.append(f"waited_for_child:expected=true,actual={waited_for_child!r}")
+    if closed_child is not True:
+        mismatches.append(f"closed_child:expected=true,actual={closed_child!r}")
     if returned_before_child_complete is not False:
         mismatches.append(
             f"returned_before_child_complete:expected=false,actual={returned_before_child_complete!r}"
@@ -1527,15 +1586,128 @@ def _build_general_session_validation_from_exec_result(exec_path_result: dict[st
     if instruction_sources is None:
         mismatches.append("instruction_sources:missing-or-invalid")
 
+    if not isinstance(thread_id, str) or not thread_id:
+        mismatches.append("thread_id:missing-or-invalid")
+    if spawned_thread_ids is None:
+        mismatches.append("spawned_thread_ids:missing-or-invalid")
+    elif len(spawned_thread_ids) != 1:
+        mismatches.append(f"spawned_thread_ids:expected_one,actual={spawned_thread_ids!r}")
+    if waited_thread_ids is None:
+        mismatches.append("waited_thread_ids:missing-or-invalid")
+    if closed_thread_ids is None:
+        mismatches.append("closed_thread_ids:missing-or-invalid")
+
+    state_db_path = _detect_codex_state_db_path()
+    state_db_error: str | None = None
+    state_db_parent: dict[str, object] | None = None
+    state_db_children: list[dict[str, object]] | None = None
+    state_db_edges: list[dict[str, object]] | None = None
+    state_db_descendants: list[dict[str, object]] | None = None
+
+    if state_db_path is None:
+        mismatches.append("codex_state_db:missing")
+    elif isinstance(thread_id, str) and thread_id:
+        # The Codex CLI may flush the state DB shortly after printing JSON events.
+        for attempt in range(5):
+            try:
+                conn = sqlite3.connect(str(state_db_path))
+                conn.row_factory = sqlite3.Row
+                try:
+                    parent_row = conn.execute(
+                        "SELECT id, model, agent_role FROM threads WHERE id = ?",
+                        (thread_id,),
+                    ).fetchone()
+                    if parent_row is None:
+                        state_db_parent = None
+                    else:
+                        state_db_parent = dict(parent_row)
+
+                    edge_rows = conn.execute(
+                        "SELECT parent_thread_id, child_thread_id, status FROM thread_spawn_edges WHERE parent_thread_id = ?",
+                        (thread_id,),
+                    ).fetchall()
+                    state_db_edges = [dict(row) for row in edge_rows]
+
+                    child_rows: list[sqlite3.Row] = []
+                    if state_db_edges:
+                        child_ids = [row["child_thread_id"] for row in state_db_edges if row.get("child_thread_id")]
+                        placeholders = ", ".join("?" for _ in child_ids) if child_ids else "?"
+                        if child_ids:
+                            child_rows = conn.execute(
+                                f"SELECT id, model, agent_role FROM threads WHERE id IN ({placeholders})",
+                                tuple(child_ids),
+                            ).fetchall()
+                    state_db_children = [dict(row) for row in child_rows]
+
+                    descendant_edges: list[dict[str, object]] = []
+                    for edge in state_db_edges or []:
+                        child_id = edge.get("child_thread_id")
+                        if not isinstance(child_id, str) or not child_id:
+                            continue
+                        grand_rows = conn.execute(
+                            "SELECT parent_thread_id, child_thread_id, status FROM thread_spawn_edges WHERE parent_thread_id = ?",
+                            (child_id,),
+                        ).fetchall()
+                        descendant_edges.extend(dict(row) for row in grand_rows)
+                    state_db_descendants = descendant_edges
+                finally:
+                    conn.close()
+
+                if state_db_parent is not None and state_db_edges is not None:
+                    break
+            except sqlite3.Error as exc:
+                state_db_error = str(exc)
+            time.sleep(0.2 * (attempt + 1))
+
+        if state_db_error is not None:
+            mismatches.append(f"codex_state_db:error:{state_db_error}")
+        if state_db_parent is None:
+            mismatches.append("codex_state_db:missing_parent_thread")
+        if state_db_edges is not None:
+            if len(state_db_edges) != 1:
+                mismatches.append(f"codex_state_db:expected_one_child_edge,actual={len(state_db_edges)}")
+            else:
+                edge_status = state_db_edges[0].get("status")
+                if edge_status != "closed":
+                    mismatches.append(f"codex_state_db:edge_not_closed:status={edge_status!r}")
+
+        if state_db_parent is not None and state_db_children is not None and state_db_edges is not None and len(state_db_edges) == 1:
+            parent_model = state_db_parent.get("model")
+            child_id = state_db_edges[0].get("child_thread_id")
+            child = next((row for row in state_db_children if row.get("id") == child_id), None)
+            if child is None:
+                mismatches.append("codex_state_db:missing_child_thread_row")
+            else:
+                child_model = child.get("model")
+                if parent_model and child_model and parent_model != child_model:
+                    mismatches.append(f"codex_state_db:model_mismatch:parent={parent_model!r},child={child_model!r}")
+                child_role = child.get("agent_role")
+                if child_role != "480-developer":
+                    mismatches.append(f"codex_state_db:unexpected_child_role:{child_role!r}")
+
+        if state_db_descendants is not None and state_db_descendants:
+            mismatches.append(f"codex_state_db:unexpected_descendant_edges:{state_db_descendants!r}")
+
     return {
         "status": "ok" if not mismatches else "blocked",
         "mismatches": mismatches,
         "developer_role": developer_role,
         "redelegated": redelegated,
         "waited_for_child": waited_for_child,
+        "closed_child": closed_child,
         "returned_before_child_complete": returned_before_child_complete,
         "unexpected_agents": unexpected_agents,
         "instruction_sources": instruction_sources,
+        "thread_id": thread_id,
+        "spawned_thread_ids": spawned_thread_ids,
+        "waited_thread_ids": waited_thread_ids,
+        "closed_thread_ids": closed_thread_ids,
+        "state_db_path": str(state_db_path) if state_db_path else None,
+        "state_db_parent": state_db_parent,
+        "state_db_edges": state_db_edges,
+        "state_db_children": state_db_children,
+        "state_db_descendants": state_db_descendants,
+        "state_db_error": state_db_error,
         "notes": notes,
         "raw_message": raw_message,
     }

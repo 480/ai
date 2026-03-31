@@ -525,7 +525,7 @@ MANAGED_CONFIG_STATE_KEY = "managed_config"
 
 CODEX_REQUIRED_SETTINGS = (
     ("features", "multi_agent", "true", True),
-    ("agents", "max_depth", "2", 2),
+    ("agents", "max_depth", "1", 1),
     ("agents", "max_threads", "200", 200),
 )
 
@@ -650,8 +650,12 @@ def _replace_toml_key_assignment(contents: str, key_path: str, rendered_value: s
 
 
 def _merge_toml_root_key(contents: str, key_name: str, rendered_value: str) -> tuple[str, bool]:
-    updated, changed = _replace_toml_key_assignment(contents, key_name, rendered_value)
-    if changed:
+    key_pattern = re.compile(rf"(?m)^(?P<prefix>\s*{re.escape(key_name)}\s*=\s*)(?P<value>[^#\n]*?)(?P<suffix>\s*(?:#.*)?)$")
+    key_match = key_pattern.search(contents)
+    if key_match is not None:
+        if key_match.group("value").strip() == rendered_value:
+            return contents, False
+        updated = key_pattern.sub(rf"\g<prefix>{rendered_value}\g<suffix>", contents, count=1)
         return updated, True
 
     line = f"{key_name} = {rendered_value}\n"
@@ -703,8 +707,12 @@ def _insert_toml_dotted_table_key(contents: str, table_name: str, key_name: str,
 
 def _merge_toml_table_key(contents: str, table_name: str, key_name: str, rendered_value: str) -> tuple[str, bool]:
     dotted_key = f"{table_name}.{key_name}"
-    updated, changed = _replace_toml_key_assignment(contents, dotted_key, rendered_value)
-    if changed:
+    dotted_key_pattern = re.compile(rf"(?m)^(?P<prefix>\s*{re.escape(dotted_key)}\s*=\s*)(?P<value>[^#\n]*?)(?P<suffix>\s*(?:#.*)?)$")
+    dotted_key_match = dotted_key_pattern.search(contents)
+    if dotted_key_match is not None:
+        if dotted_key_match.group("value").strip() == rendered_value:
+            return contents, False
+        updated = dotted_key_pattern.sub(rf"\g<prefix>{rendered_value}\g<suffix>", contents, count=1)
         return updated, True
 
     table_match = _table_header_pattern(table_name).search(contents)

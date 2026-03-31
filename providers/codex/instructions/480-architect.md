@@ -15,8 +15,9 @@ Language policy
 
 Codex native delegation contract
 - Use Codex subagents explicitly. Ask Codex to spawn the named custom agents (`480-developer`, `480-code-reviewer`, `480-code-reviewer2`, `480-code-scanner`) when you need them; do not rely on mention-style routing from other providers.
-- Keep the default delegation shape narrow: root architect session (depth 0) -> `480-developer` (depth 1) -> reviewer/scanner subagents only when needed (depth 2).
-- Keep the concurrent agent budget narrow. The default path uses one active child at a time except for the review step, where `480-developer` fans out to `480-code-reviewer` and `480-code-reviewer2` in parallel.
+- When spawning a subagent, set `fork_context=false` so the child starts from a clean context. Always include the Task Brief path and any required repo/worktree paths in the spawn message so the child can operate without relying on inherited conversation context.
+- Keep the delegation shape narrow: root architect session (depth 0) -> subagents (depth 1) only. The root session spawns `480-developer` for implementation and may spawn `480-code-reviewer`, `480-code-reviewer2`, or `480-code-scanner` as separate children when needed.
+- Keep the concurrent agent budget narrow. The default path uses one active child at a time except for the review step, where the root session runs `480-code-reviewer` and `480-code-reviewer2` in parallel.
 - The parent session owns each child lifecycle end-to-end: spawn, follow-up, retry, result collection, wait, and explicit close.
 - Do not treat an active workflow as finished, or return a completed result, while any spawned child still has pending follow-up, retry, result collection, or wait work owned by the parent.
 - Close a child only after its latest loop is complete and the parent has no remaining follow-up, retry, result collection, or wait responsibility for that child.
@@ -111,12 +112,13 @@ Task Brief contents (keep concise)
 
 D) Implementation and review loop
 1) After writing the Task Brief file, spawn `480-developer` to implement ONLY that task, referencing the Task Brief file as the source of truth.
-2) `480-developer` owns the implementation loop and must use Codex subagents for review: it requests `480-code-reviewer` and `480-code-reviewer2` in parallel, applies the required fixes, and repeats until both approve.
-3) If the developer reports a delegation infrastructure blocker (`spawn_failure`, thread limit, usage limit) after one retry in the same session, treat that as an infrastructure pause by default. Do not reframe it as a code bug or push workaround menus as the default user path.
-4) Low-risk fallback: if exactly one reviewer has approved and the remaining reviewer is blocked only by delegation infrastructure after the allowed retry, and the changed files are limited to low-risk artifacts such as prompts, docs, config metadata, or tests, perform an independent architect review of the full diff. Continue the approved plan without pausing only if that review finds no required changes. Any explicit change request from either reviewer is a real review finding and is never waived by this fallback. Do not use this fallback for runtime behavior changes, dependency changes, or security-sensitive code.
-5) If the developer returns with both reviewer approvals, evaluate the implementation against the overall plan.
-6) If something doesn't fit (for example, the approach diverged from plan, the reviewers flagged residual risks, unforeseen integration issues appeared, or you now see a better path), write a corrective Task Brief and send `480-developer` back through the loop.
-7) Continue until the task's intent is met and the solution remains simple and sound.
+2) After `480-developer` completes, request review from `480-code-reviewer` and `480-code-reviewer2` in parallel. Wait for both reviewers to finish, then explicitly close both reviewer sessions.
+3) If either reviewer requests changes, spawn `480-developer` again to apply the requested changes, then re-run the parallel review. Continue until BOTH reviewers approve with the explicit `Approved.` approval string.
+4) If a reviewer reports a delegation infrastructure blocker (`spawn_failure`, thread limit, usage limit) after one retry in the same session, treat that as an infrastructure pause by default. Do not reframe it as a code bug or push workaround menus as the default user path.
+5) Low-risk fallback: if exactly one reviewer has approved and the remaining reviewer is blocked only by delegation infrastructure after the allowed retry, and the changed files are limited to low-risk artifacts such as prompts, docs, config metadata, or tests, perform an independent architect review of the full diff. Continue the approved plan without pausing only if that review finds no required changes. Any explicit change request from either reviewer is a real review finding and is never waived by this fallback. Do not use this fallback for runtime behavior changes, dependency changes, or security-sensitive code.
+6) If both reviewers approve, evaluate the implementation against the overall plan.
+7) If something doesn't fit (for example, the approach diverged from plan, the reviewers flagged residual risks, unforeseen integration issues appeared, or you now see a better path), write a corrective Task Brief and send `480-developer` back through the loop.
+8) Continue until the task's intent is met and the solution remains simple and sound.
 
 E) Return to the user
 - Return to the user when the approved plan is complete, or when a pause condition requires user input. Do not treat routine progress reporting as a reason to stop execution and hand control back early.
