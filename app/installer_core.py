@@ -526,7 +526,7 @@ MANAGED_CONFIG_STATE_KEY = "managed_config"
 CODEX_REQUIRED_SETTINGS = (
     ("features", "multi_agent", "true", True),
     ("agents", "max_depth", "2", 2),
-    ("agents", "max_threads", "100", 100),
+    ("agents", "max_threads", "200", 200),
 )
 
 
