@@ -32,3 +32,20 @@ curl -fsSL "https://raw.githubusercontent.com/480/ai/main/bootstrap/uninstall-re
 ## License
 
 MIT
+
+## Architecture
+
+The 480 agent workflow follows a short, explicit loop:
+
+```mermaid
+flowchart TB
+  U["User request"] --> A["480-architect"]
+  A --> TB["Task Brief"]
+  TB --> D["480-developer"]
+  D --> R["Dual reviews (480-code-reviewer / 480-code-reviewer2)"]
+  R -->|findings| I["Iterate fixes"]
+  R -->|approved| F["Final delivery"]
+  I --> D
+```
+
+The flow keeps scope tight: each task is implemented by `480-developer`, reviewed by two reviewers, and repeated only when findings appear.
