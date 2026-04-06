@@ -3207,6 +3207,40 @@ manage_agents.install(target="codex", scope="user")
         self.assertEqual(request.codex_user_root, Path.home() / ".codex-harness")
         self.assertIn("Optional custom Codex user root", stdout.getvalue())
 
+    def test_prompt_install_options_tui_clears_codex_user_root_after_scope_changes_to_project(self) -> None:
+        keys = [
+            10,
+            10,
+            ord("/"),
+            ord("t"),
+            ord("m"),
+            ord("p"),
+            ord("/"),
+            ord("x"),
+            10,
+            10,
+            FakeCursesModule.KEY_LEFT,
+            FakeCursesModule.KEY_LEFT,
+            FakeCursesModule.KEY_LEFT,
+            FakeCursesModule.KEY_DOWN,
+            10,
+            10,
+            10,
+            10,
+        ]
+        fake_curses = FakeCursesModule(screen=FakeCursesScreen(keys))
+
+        with (
+            self.patched_detected_interactive_providers("codex"),
+            mock.patch.dict(sys.modules, {"curses": fake_curses}),
+        ):
+            install_options = manage_agents.prompt_install_options_tui()
+
+        self.assertEqual([request.target for request in install_options.providers], ["codex"])
+        request = install_options.providers[0]
+        self.assertEqual(request.scope, "project")
+        self.assertIsNone(request.codex_user_root)
+
     def test_prompt_install_options_shows_teams_prompt_only_for_claude(self) -> None:
         stdin = TTYStringIO("2\n\n\n\n\n\n")
         stdout = TTYStringIO()
@@ -3810,6 +3844,38 @@ manage_agents.install(target="codex", scope="user")
             activate_default=None,
             codex_user_root=Path.home() / ".codex-harness",
         )
+
+    def test_install_main_ignores_codex_user_root_env_for_unrelated_interactive_install(self) -> None:
+        stdin = TTYStringIO()
+        stdout = TTYStringIO()
+        install_options = manage_agents.InstallOptions(
+            providers=(
+                manage_agents.ProviderInstallRequest(
+                    target="opencode",
+                    scope="user",
+                    activate_default=True,
+                ),
+            )
+        )
+
+        with (
+            mock.patch.object(manage_agents.sys, "stdin", stdin),
+            mock.patch.object(manage_agents.sys, "stdout", stdout),
+            mock.patch.dict(
+                os.environ,
+                {
+                    "BOOTSTRAP_CODEX_USER_ROOT": "~/.codex-harness",
+                },
+                clear=True,
+            ),
+            mock.patch.object(manage_agents, "prompt_install_options", return_value=install_options) as prompt_mock,
+            mock.patch.object(manage_agents, "install") as install_mock,
+        ):
+            result = manage_agents.main(["manage_agents.py", "install"])
+
+        self.assertEqual(result, 0)
+        prompt_mock.assert_called_once()
+        install_mock.assert_called_once_with(target="opencode", scope="user", activate_default=True)
 
     def test_parse_role_model_choice_entries_preserves_reviewer2_mini_high_and_migrates_removed_scanner_mini_keys(self) -> None:
         parsed = manage_agents.parse_role_model_choice_entries(

@@ -218,6 +218,10 @@ def uses_default_codex_user_root(target: InstallTarget) -> bool:
     return user_root == default_codex_user_root()
 
 
+def request_targets_codex_user_scope(*, target: str, scope: str) -> bool:
+    return target == "codex" and scope == "user"
+
+
 def parse_optional_bool(raw: str, *, env_name: str) -> bool:
     normalized = raw.strip().lower()
     if normalized in {"1", "true", "yes", "y", "on"}:
@@ -903,6 +907,8 @@ def prompt_install_options_tui() -> InstallOptions:
                         step_index = len(steps_for_target(selected_targets[target_index])) - 1
                         continue
                     state["scope"] = selection
+                    if target == "codex" and selection != "user":
+                        state["codex_user_root"] = ""
                 elif current_step == "activate_default":
                     selection = tui_prompt_single_choice(
                         screen,
@@ -1018,9 +1024,13 @@ def prompt_install_options_tui() -> InstallOptions:
                         target=target,
                         scope=state["scope"],
                         activate_default=state["activate_default"],
-                        codex_user_root=normalize_codex_user_root(
-                            state["codex_user_root"],
-                            source="Codex user root",
+                        codex_user_root=(
+                            normalize_codex_user_root(
+                                state["codex_user_root"],
+                                source="Codex user root",
+                            )
+                            if request_targets_codex_user_scope(target=target, scope=state["scope"])
+                            else None
                         ),
                         enable_teams=state["enable_teams"],
                         desktop_notifications=state["desktop_notifications"],
@@ -1174,12 +1184,16 @@ def should_prompt_install(
     stdin: TextIO,
     stdout: TextIO,
 ) -> bool:
+    target = args.target or env.get(INSTALL_TARGET_ENV) or DEFAULT_TARGET
+    scope = args.scope or env.get(INSTALL_SCOPE_ENV) or DEFAULT_SCOPE
+    codex_user_root_is_relevant = request_targets_codex_user_scope(target=target, scope=scope)
+
     explicit_cli = any(
         value is not None
         for value in (
             args.target,
             args.scope,
-            args.codex_user_root,
+            args.codex_user_root if codex_user_root_is_relevant else None,
             args.activate_default,
             args.desktop_notifications,
             args.model_mode,
@@ -1191,13 +1205,14 @@ def should_prompt_install(
         for name in (
             INSTALL_TARGET_ENV,
             INSTALL_SCOPE_ENV,
-            CODEX_USER_ROOT_ENV,
             INSTALL_ACTIVATE_DEFAULT_ENV,
             INSTALL_DESKTOP_NOTIFY_ENV,
             INSTALL_MODEL_MODE_ENV,
             INSTALL_ROLE_MODEL_CHOICES_ENV,
         )
     )
+    if codex_user_root_is_relevant and CODEX_USER_ROOT_ENV in env:
+        explicit_env = True
     if explicit_cli or explicit_env:
         return False
     return stdin.isatty() and stdout.isatty()
@@ -1210,11 +1225,13 @@ def resolve_install_options_from_inputs(
 ) -> InstallOptions:
     target = args.target or env.get(INSTALL_TARGET_ENV) or DEFAULT_TARGET
     scope = args.scope or env.get(INSTALL_SCOPE_ENV) or DEFAULT_SCOPE
-    raw_codex_user_root = args.codex_user_root
-    if raw_codex_user_root is None and CODEX_USER_ROOT_ENV in env:
-        raw_codex_user_root = env[CODEX_USER_ROOT_ENV]
-    codex_user_root = normalize_codex_user_root(raw_codex_user_root, source=CODEX_USER_ROOT_ENV)
-    codex_user_root = codex_user_root_for_request(target=target, scope=scope, codex_user_root=codex_user_root)
+    codex_user_root: Path | None = None
+    if request_targets_codex_user_scope(target=target, scope=scope):
+        raw_codex_user_root = args.codex_user_root
+        if raw_codex_user_root is None and CODEX_USER_ROOT_ENV in env:
+            raw_codex_user_root = env[CODEX_USER_ROOT_ENV]
+        codex_user_root = normalize_codex_user_root(raw_codex_user_root, source=CODEX_USER_ROOT_ENV)
+        codex_user_root = codex_user_root_for_request(target=target, scope=scope, codex_user_root=codex_user_root)
 
     activate_default = args.activate_default
     if activate_default is None and INSTALL_ACTIVATE_DEFAULT_ENV in env:
