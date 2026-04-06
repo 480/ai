@@ -3877,6 +3877,31 @@ manage_agents.install(target="codex", scope="user")
         prompt_mock.assert_called_once()
         install_mock.assert_called_once_with(target="opencode", scope="user", activate_default=True)
 
+    def test_install_main_rejects_explicit_codex_user_root_for_unrelated_target(self) -> None:
+        stdin = TTYStringIO()
+        stdout = TTYStringIO()
+
+        with (
+            mock.patch.object(manage_agents.sys, "stdin", stdin),
+            mock.patch.object(manage_agents.sys, "stdout", stdout),
+            mock.patch.dict(os.environ, {}, clear=True),
+            self.assertRaises(SystemExit) as exc,
+        ):
+            manage_agents.main(
+                [
+                    "manage_agents.py",
+                    "install",
+                    "--target",
+                    "opencode",
+                    "--scope",
+                    "user",
+                    "--codex-user-root",
+                    "~/.codex-harness",
+                ]
+            )
+
+        self.assertEqual(str(exc.exception), "Custom Codex user root is supported only for Codex user scope.")
+
     def test_parse_role_model_choice_entries_preserves_reviewer2_mini_high_and_migrates_removed_scanner_mini_keys(self) -> None:
         parsed = manage_agents.parse_role_model_choice_entries(
             [

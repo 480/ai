@@ -1193,7 +1193,7 @@ def should_prompt_install(
         for value in (
             args.target,
             args.scope,
-            args.codex_user_root if codex_user_root_is_relevant else None,
+            args.codex_user_root,
             args.activate_default,
             args.desktop_notifications,
             args.model_mode,
@@ -1225,13 +1225,17 @@ def resolve_install_options_from_inputs(
 ) -> InstallOptions:
     target = args.target or env.get(INSTALL_TARGET_ENV) or DEFAULT_TARGET
     scope = args.scope or env.get(INSTALL_SCOPE_ENV) or DEFAULT_SCOPE
-    codex_user_root: Path | None = None
-    if request_targets_codex_user_scope(target=target, scope=scope):
-        raw_codex_user_root = args.codex_user_root
-        if raw_codex_user_root is None and CODEX_USER_ROOT_ENV in env:
-            raw_codex_user_root = env[CODEX_USER_ROOT_ENV]
-        codex_user_root = normalize_codex_user_root(raw_codex_user_root, source=CODEX_USER_ROOT_ENV)
+    raw_codex_user_root = args.codex_user_root
+    codex_user_root: Path | None
+    if raw_codex_user_root is not None:
+        codex_user_root = normalize_codex_user_root(raw_codex_user_root, source="--codex-user-root")
         codex_user_root = codex_user_root_for_request(target=target, scope=scope, codex_user_root=codex_user_root)
+    elif request_targets_codex_user_scope(target=target, scope=scope):
+        env_codex_user_root = env.get(CODEX_USER_ROOT_ENV)
+        codex_user_root = normalize_codex_user_root(env_codex_user_root, source=CODEX_USER_ROOT_ENV)
+        codex_user_root = codex_user_root_for_request(target=target, scope=scope, codex_user_root=codex_user_root)
+    else:
+        codex_user_root = None
 
     activate_default = args.activate_default
     if activate_default is None and INSTALL_ACTIVATE_DEFAULT_ENV in env:
