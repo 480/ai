@@ -57,6 +57,7 @@ DEFAULT_VERIFY_TARGET = "codex"
 DEFAULT_VERIFY_SCOPE = "user"
 INSTALL_TARGET_ENV = "BOOTSTRAP_TARGET"
 INSTALL_SCOPE_ENV = "BOOTSTRAP_SCOPE"
+CODEX_USER_ROOT_ENV = "BOOTSTRAP_CODEX_USER_ROOT"
 INSTALL_ACTIVATE_DEFAULT_ENV = "BOOTSTRAP_ACTIVATE_DEFAULT"
 INSTALL_DESKTOP_NOTIFY_ENV = "BOOTSTRAP_DESKTOP_NOTIFY"
 INSTALL_MODEL_MODE_ENV = "BOOTSTRAP_MODEL_MODE"
@@ -88,6 +89,7 @@ class ProviderInstallRequest:
     target: str
     scope: str
     activate_default: bool | None
+    codex_user_root: Path | None = None
     enable_teams: bool | None = None
     desktop_notifications: bool | None = None
     model_selection: ProviderModelSelection | None = None
@@ -161,6 +163,59 @@ def interactive_default_target(choices: tuple[Choice, ...]) -> str:
 
 def resolve_target(target: str = DEFAULT_TARGET, scope: str = DEFAULT_SCOPE) -> InstallTarget:
     return resolve_install_target(target=target, scope=scope)
+
+
+def default_codex_user_root(home: Path | None = None) -> Path:
+    resolved_home = Path.home() if home is None else home
+    return resolved_home / ".codex"
+
+
+def normalize_codex_user_root(raw: str | None, *, source: str) -> Path | None:
+    if raw is None:
+        return None
+    stripped = raw.strip()
+    if not stripped:
+        return None
+
+    root = Path(stripped).expanduser()
+    if not root.is_absolute():
+        raise SystemExit(f"{source} must be an absolute path or use '~'.")
+    if root == root.parent:
+        raise SystemExit(f"{source} must not be the filesystem root.")
+
+    forbidden_roots = {
+        Path.home() / ".codex-app",
+        Path.home() / ".codex-struct-app",
+    }
+    if root in forbidden_roots:
+        raise SystemExit(f"{source} cannot target {root}.")
+    return root
+
+
+def codex_user_root_for_request(
+    *,
+    target: str,
+    scope: str,
+    codex_user_root: Path | None,
+) -> Path | None:
+    if codex_user_root is None:
+        return None
+    if target != "codex" or scope != "user":
+        raise SystemExit("Custom Codex user root is supported only for Codex user scope.")
+    return codex_user_root
+
+
+def effective_codex_user_root(target: InstallTarget) -> Path | None:
+    if target.name != "codex" or target.scope != "user":
+        return None
+    return target.paths.config_dir
+
+
+def uses_default_codex_user_root(target: InstallTarget) -> bool:
+    user_root = effective_codex_user_root(target)
+    if user_root is None:
+        return True
+    return user_root == default_codex_user_root()
 
 
 def parse_optional_bool(raw: str, *, env_name: str) -> bool:
@@ -659,6 +714,50 @@ def tui_prompt_single_choice(
             return selected.value
 
 
+def tui_prompt_text_input(
+    screen: Any,
+    *,
+    title: str,
+    prompt: str,
+    default_value: str,
+    allow_back: bool = False,
+) -> str | TuiNavigateBack:
+    import curses
+
+    left_key = getattr(curses, "KEY_LEFT", None)
+    backspace_keys = {getattr(curses, "KEY_BACKSPACE", None), 127, 8}
+    value = default_value
+
+    while True:
+        lines = [
+            prompt,
+            "",
+            f"Current value: {value or '(default root)'}",
+        ]
+        tui_render_screen(
+            screen,
+            title=title,
+            lines=lines,
+            footer=(
+                "Type to edit | Backspace: Delete | Enter: Next | Left Arrow: Back"
+                if allow_back
+                else "Type to edit | Backspace: Delete | Enter: Next"
+            ),
+        )
+
+        key = screen.getch()
+        if allow_back and left_key is not None and key == left_key:
+            return TUI_NAVIGATE_BACK
+        if key in (curses.KEY_ENTER, 10, 13):
+            return value
+        if key in backspace_keys:
+            value = value[:-1]
+            continue
+        if 32 <= key <= 126:
+            value += chr(key)
+            continue
+
+
 def resolved_advanced_role_model_option(
     request: ProviderInstallRequest,
     *,
@@ -678,6 +777,10 @@ def build_install_summary_lines(requests: tuple[ProviderInstallRequest, ...]) ->
     for request in requests:
         provider = get_provider(request.target)
         lines.append(f"- {provider.label}: scope={request.scope}")
+        if request.target == "codex" and request.scope == "user":
+            lines.append(
+                f"  user root: {request.codex_user_root or default_codex_user_root()}"
+            )
         if request.activate_default is not None:
             activation = "yes" if request.activate_default else "no"
             lines.append(f"  default activation: {activation}")
@@ -733,6 +836,7 @@ def prompt_install_options_tui() -> InstallOptions:
                 state = {
                     "scope": DEFAULT_SCOPE,
                     "activate_default": default_activation_for_target(target),
+                    "codex_user_root": "",
                     "enable_teams": teams_flag_default_for_target(target),
                     "desktop_notifications": desktop_notifications_default_for_target(target),
                     "model_mode": (
@@ -748,6 +852,8 @@ def prompt_install_options_tui() -> InstallOptions:
         def steps_for_target(target: str) -> list[str]:
             state = ensure_target_state(target)
             steps = ["scope"]
+            if target == "codex" and state["scope"] == "user":
+                steps.append("codex_user_root")
             if state["activate_default"] is not None:
                 steps.append("activate_default")
             if state["enable_teams"] is not None:
@@ -812,6 +918,19 @@ def prompt_install_options_tui() -> InstallOptions:
                         step_index -= 1
                         continue
                     state["activate_default"] = selection == "yes"
+                elif current_step == "codex_user_root":
+                    selection = tui_prompt_text_input(
+                        screen,
+                        title="Optional custom Codex user root.",
+                        prompt="Leave empty to use the default root.",
+                        default_value=state["codex_user_root"],
+                        allow_back=True,
+                    )
+                    if selection is TUI_NAVIGATE_BACK:
+                        step_index -= 1
+                        continue
+                    normalize_codex_user_root(selection, source="Codex user root")
+                    state["codex_user_root"] = selection
                 elif current_step == "enable_teams":
                     selection = tui_prompt_single_choice(
                         screen,
@@ -899,6 +1018,10 @@ def prompt_install_options_tui() -> InstallOptions:
                         target=target,
                         scope=state["scope"],
                         activate_default=state["activate_default"],
+                        codex_user_root=normalize_codex_user_root(
+                            state["codex_user_root"],
+                            source="Codex user root",
+                        ),
                         enable_teams=state["enable_teams"],
                         desktop_notifications=state["desktop_notifications"],
                         model_selection=model_selection,
@@ -952,6 +1075,18 @@ def prompt_install_options_basic(
         default_value=DEFAULT_SCOPE,
     )
 
+    codex_user_root: Path | None = None
+    if target == "codex" and scope == "user":
+        default_root = default_codex_user_root()
+        print_line(output, f"Optional custom Codex user root (default: {default_root})")
+        output.write("Path [Enter for default]: ")
+        output.flush()
+        response = input_stream.readline()
+        if response == "":
+            raise SystemExit("Could not read install input.")
+        codex_user_root = normalize_codex_user_root(response, source="Codex user root")
+        print_line(output)
+
     activate_default = default_activation_for_target(target)
     if activate_default is not None:
         activate_default = prompt_bool_choice(
@@ -993,6 +1128,7 @@ def prompt_install_options_basic(
                     target=target,
                     scope=scope,
                     activate_default=activate_default,
+                    codex_user_root=codex_user_root,
                     enable_teams=enable_teams,
                     desktop_notifications=desktop_notifications,
                 ),
@@ -1022,6 +1158,7 @@ def prompt_install_options_basic(
                 target=target,
                 scope=scope,
                 activate_default=activate_default,
+                codex_user_root=codex_user_root,
                 enable_teams=enable_teams,
                 desktop_notifications=desktop_notifications,
                 model_selection=advanced_model_selection_for_target(target, role_options),
@@ -1042,6 +1179,7 @@ def should_prompt_install(
         for value in (
             args.target,
             args.scope,
+            args.codex_user_root,
             args.activate_default,
             args.desktop_notifications,
             args.model_mode,
@@ -1053,6 +1191,7 @@ def should_prompt_install(
         for name in (
             INSTALL_TARGET_ENV,
             INSTALL_SCOPE_ENV,
+            CODEX_USER_ROOT_ENV,
             INSTALL_ACTIVATE_DEFAULT_ENV,
             INSTALL_DESKTOP_NOTIFY_ENV,
             INSTALL_MODEL_MODE_ENV,
@@ -1071,6 +1210,11 @@ def resolve_install_options_from_inputs(
 ) -> InstallOptions:
     target = args.target or env.get(INSTALL_TARGET_ENV) or DEFAULT_TARGET
     scope = args.scope or env.get(INSTALL_SCOPE_ENV) or DEFAULT_SCOPE
+    raw_codex_user_root = args.codex_user_root
+    if raw_codex_user_root is None and CODEX_USER_ROOT_ENV in env:
+        raw_codex_user_root = env[CODEX_USER_ROOT_ENV]
+    codex_user_root = normalize_codex_user_root(raw_codex_user_root, source=CODEX_USER_ROOT_ENV)
+    codex_user_root = codex_user_root_for_request(target=target, scope=scope, codex_user_root=codex_user_root)
 
     activate_default = args.activate_default
     if activate_default is None and INSTALL_ACTIVATE_DEFAULT_ENV in env:
@@ -1105,9 +1249,14 @@ def resolve_install_options_from_inputs(
                     target=target,
                     scope=scope,
                     activate_default=activate_default,
+                    codex_user_root=codex_user_root,
                     desktop_notifications=desktop_notifications,
                     model_selection=(
-                        load_persisted_model_selection(resolve_target(target, scope))
+                        load_persisted_model_selection(resolve_install_target(
+                            target=target,
+                            scope=scope,
+                            user_root_override=codex_user_root,
+                        ))
                         if install_reuses_existing_model_selection(args=args, env=env)
                         else None
                     ),
@@ -1125,6 +1274,7 @@ def resolve_install_options_from_inputs(
                     target=target,
                     scope=scope,
                     activate_default=activate_default,
+                    codex_user_root=codex_user_root,
                     desktop_notifications=desktop_notifications,
                     model_selection=advanced_model_selection_for_target(target, parsed_choices),
                 ),
@@ -1136,21 +1286,30 @@ def resolve_uninstall_options_from_inputs(
     *,
     args: argparse.Namespace,
     env: dict[str, str],
-) -> tuple[str, str]:
+) -> tuple[str, str, Path | None]:
     target = args.target or env.get(INSTALL_TARGET_ENV) or DEFAULT_TARGET
     scope = args.scope or env.get(INSTALL_SCOPE_ENV) or DEFAULT_SCOPE
-    return target, scope
+    raw_codex_user_root = args.codex_user_root
+    if raw_codex_user_root is None and CODEX_USER_ROOT_ENV in env:
+        raw_codex_user_root = env[CODEX_USER_ROOT_ENV]
+    codex_user_root = normalize_codex_user_root(raw_codex_user_root, source=CODEX_USER_ROOT_ENV)
+    codex_user_root = codex_user_root_for_request(target=target, scope=scope, codex_user_root=codex_user_root)
+    return target, scope, codex_user_root
 
 
 def resolve_verify_options_from_inputs(
     *,
     args: argparse.Namespace,
     env: dict[str, str],
-) -> tuple[str, str]:
-    _ = env
+) -> tuple[str, str, Path | None]:
     target = args.target or DEFAULT_VERIFY_TARGET
     scope = args.scope or DEFAULT_VERIFY_SCOPE
-    return target, scope
+    raw_codex_user_root = args.codex_user_root
+    if raw_codex_user_root is None and CODEX_USER_ROOT_ENV in env:
+        raw_codex_user_root = env[CODEX_USER_ROOT_ENV]
+    codex_user_root = normalize_codex_user_root(raw_codex_user_root, source=CODEX_USER_ROOT_ENV)
+    codex_user_root = codex_user_root_for_request(target=target, scope=scope, codex_user_root=codex_user_root)
+    return target, scope, codex_user_root
 
 
 def prompt_install_options(
@@ -1173,6 +1332,8 @@ def run_install_requests(requests: tuple[ProviderInstallRequest, ...]) -> None:
             "scope": request.scope,
             "activate_default": request.activate_default,
         }
+        if request.codex_user_root is not None:
+            install_kwargs["codex_user_root"] = request.codex_user_root
         if request.enable_teams is not None:
             install_kwargs["enable_teams"] = request.enable_teams
         if request.desktop_notifications is not None:
@@ -1462,6 +1623,8 @@ def _classify_verify_results(results: dict[str, dict[str, object]]) -> str:
     if results["install_state"]["status"] != "ok" or results["cleanup_result"]["status"] != "ok":
         return "install_issue"
     exec_path_result = results["exec_path_result"]
+    if exec_path_result["status"] == "skipped":
+        return "success"
     if exec_path_result["status"] != "ok":
         if exec_path_result.get("error") or exec_path_result.get("returncode") not in (None, 0):
             return "platform_blocker"
@@ -1484,13 +1647,32 @@ def _build_general_session_validation() -> dict[str, object]:
     }
 
 
-def verify(target: str = DEFAULT_VERIFY_TARGET, scope: str = DEFAULT_VERIFY_SCOPE) -> dict[str, object]:
+def _build_skipped_general_session_validation(*, reason: str) -> dict[str, object]:
+    return {
+        "status": "skipped",
+        "mismatches": [],
+        "developer_role": None,
+        "redelegated": None,
+        "waited_for_child": None,
+        "returned_before_child_complete": None,
+        "unexpected_agents": None,
+        "instruction_sources": None,
+        "notes": reason,
+        "raw_message": None,
+    }
+
+
+def verify(
+    target: str = DEFAULT_VERIFY_TARGET,
+    scope: str = DEFAULT_VERIFY_SCOPE,
+    codex_user_root: Path | None = None,
+) -> dict[str, object]:
     if target != "codex":
         raise SystemExit("verify currently supports only target codex.")
     if scope != "user":
         raise SystemExit("verify currently supports only scope user.")
 
-    resolved_target = resolve_target(target, scope)
+    resolved_target = resolve_install_target(target=target, scope=scope, user_root_override=codex_user_root)
     install_state = {
         "agent_outputs": _verify_codex_agent_outputs(resolved_target),
         "config": _verify_codex_config(resolved_target),
@@ -1499,10 +1681,20 @@ def verify(target: str = DEFAULT_VERIFY_TARGET, scope: str = DEFAULT_VERIFY_SCOP
     install_state["status"] = "ok" if all(section["status"] == "ok" for section in install_state.values() if isinstance(section, dict)) else "mismatch"
 
     cleanup_result = _verify_codex_cleanup(resolved_target)
-    exec_path_result = _run_codex_noop_validation(REPO_ROOT)
-    general_session_validation = _build_general_session_validation_from_exec_result(exec_path_result)
+    if uses_default_codex_user_root(resolved_target):
+        exec_path_result = _run_codex_noop_validation(REPO_ROOT)
+        general_session_validation = _build_general_session_validation_from_exec_result(exec_path_result)
+    else:
+        exec_path_result = {
+            "status": "skipped",
+            "notes": "Runtime activation validation is skipped for alternate Codex user roots.",
+        }
+        general_session_validation = _build_skipped_general_session_validation(
+            reason="Runtime activation validation is skipped for alternate Codex user roots.",
+        )
 
     results = {
+        "target_root": str(resolved_target.paths.config_dir),
         "install_state": install_state,
         "cleanup_result": cleanup_result,
         "general_session_validation": general_session_validation,
@@ -1718,13 +1910,18 @@ def install(
     scope: str = DEFAULT_SCOPE,
     force: bool = False,
     activate_default: bool | None = None,
+    codex_user_root: Path | None = None,
     enable_teams: bool | None = None,
     desktop_notifications: bool | None = None,
     model_selection: ProviderModelSelection | None = None,
 ) -> None:
-    resolved_target = resolve_target(target, scope)
+    codex_user_root = codex_user_root_for_request(target=target, scope=scope, codex_user_root=codex_user_root)
+    resolved_target = resolve_install_target(target=target, scope=scope, user_root_override=codex_user_root)
     provider = get_provider(target)
     codex_managed_guidance = render_codex_managed_guidance(load_bundle()) if target == "codex" else None
+    effective_root = effective_codex_user_root(resolved_target)
+    if effective_root is not None:
+        print_line(sys.stdout, f"Codex user root: {effective_root}")
     if activate_default is None:
         should_activate_default = load_persisted_default_activation(resolved_target, provider=provider)
     else:
@@ -1763,8 +1960,16 @@ def install(
         )
 
 
-def uninstall(target: str = DEFAULT_TARGET, scope: str = DEFAULT_SCOPE) -> None:
-    resolved_target = resolve_target(target, scope)
+def uninstall(
+    target: str = DEFAULT_TARGET,
+    scope: str = DEFAULT_SCOPE,
+    codex_user_root: Path | None = None,
+) -> None:
+    codex_user_root = codex_user_root_for_request(target=target, scope=scope, codex_user_root=codex_user_root)
+    resolved_target = resolve_install_target(target=target, scope=scope, user_root_override=codex_user_root)
+    effective_root = effective_codex_user_root(resolved_target)
+    if effective_root is not None:
+        print_line(sys.stdout, f"Codex user root: {effective_root}")
     model_selection = load_persisted_model_selection(resolved_target)
     if model_selection is None:
         run_uninstall(
@@ -1792,6 +1997,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("action", choices=("install", "uninstall", "verify"))
     parser.add_argument("--target")
     parser.add_argument("--scope")
+    parser.add_argument("--codex-user-root")
     activation_group = parser.add_mutually_exclusive_group()
     activation_group.add_argument("--activate-default", dest="activate_default", action="store_true")
     activation_group.add_argument("--no-activate-default", dest="activate_default", action="store_false")
@@ -1819,11 +2025,17 @@ def main(argv: list[str]) -> int:
             install_options = resolve_install_options_from_inputs(args=args, env=env)
         run_install_requests(install_options.providers)
     elif args.action == "uninstall":
-        target, scope = resolve_uninstall_options_from_inputs(args=args, env=env)
-        uninstall(target=target, scope=scope)
+        target, scope, codex_user_root = resolve_uninstall_options_from_inputs(args=args, env=env)
+        uninstall_kwargs = {"target": target, "scope": scope}
+        if codex_user_root is not None:
+            uninstall_kwargs["codex_user_root"] = codex_user_root
+        uninstall(**uninstall_kwargs)
     else:
-        target, scope = resolve_verify_options_from_inputs(args=args, env=env)
-        result = verify(target=target, scope=scope)
+        target, scope, codex_user_root = resolve_verify_options_from_inputs(args=args, env=env)
+        verify_kwargs = {"target": target, "scope": scope}
+        if codex_user_root is not None:
+            verify_kwargs["codex_user_root"] = codex_user_root
+        result = verify(**verify_kwargs)
         print_line(sys.stdout, json.dumps(result, ensure_ascii=False))
         return 0 if result["final_classification"] in {"success", "exec_path_limitation"} else 1
     return 0
