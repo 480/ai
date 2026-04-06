@@ -146,13 +146,24 @@ class ProviderSpec:
             raise ValueError(f"Invalid {self.label} compatibility agent names.")
         return compatibility_names.copy()
 
-    def resolve_install_target(self, scope: str, home: Path | None = None) -> InstallTarget:
+    def resolve_install_target(
+        self,
+        scope: str,
+        home: Path | None = None,
+        *,
+        user_root_override: Path | None = None,
+    ) -> InstallTarget:
         resolved_home = Path.home() if home is None else home
         if scope not in self.supported_scopes:
             raise SystemExit(f"Unsupported install scope for {self.identifier}: {scope}")
 
         if scope == "user":
-            config_dir = resolved_home.joinpath(*self.user_config_dir_parts)
+            if user_root_override is not None:
+                if self.identifier != "codex":
+                    raise SystemExit(f"Custom user root is not supported for {self.label}.")
+                config_dir = user_root_override
+            else:
+                config_dir = resolved_home.joinpath(*self.user_config_dir_parts)
             state = bootstrap_state_paths(config_dir / ".480ai-bootstrap")
         else:
             project_root = resolve_project_root()
@@ -608,5 +619,11 @@ def get_provider(target: str) -> ProviderSpec:
     return provider
 
 
-def resolve_install_target(target: str, scope: str, home: Path | None = None) -> InstallTarget:
-    return get_provider(target).resolve_install_target(scope, home=home)
+def resolve_install_target(
+    target: str,
+    scope: str,
+    home: Path | None = None,
+    *,
+    user_root_override: Path | None = None,
+) -> InstallTarget:
+    return get_provider(target).resolve_install_target(scope, home=home, user_root_override=user_root_override)

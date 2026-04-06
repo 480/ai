@@ -45,10 +45,14 @@ Checked-in Codex custom agent TOMLs omit `model`, so spawned sessions inherit th
 
 ## Install names and paths
 
-Install files are copied to `~/.codex/agents/` or `<project>/.codex/agents/`.
-User scope adds the 480ai managed block to `~/.codex/AGENTS.md`; project scope adds it to the repository root `AGENTS.md`.
-Codex config follows the official contract and applies only minimal merges to `~/.codex/config.toml` or `<project>/.codex/config.toml`.
+Install files are copied to the selected Codex user root `agents/` directory or `<project>/.codex/agents/`.
+Codex user scope defaults to `~/.codex`, and install/uninstall/verify may target an alternate user root such as `~/.codex-harness` with `--codex-user-root` or `BOOTSTRAP_CODEX_USER_ROOT`.
+User scope adds the 480ai managed block to `<codex-user-root>/AGENTS.md`; project scope adds it to the repository root `AGENTS.md`.
+Codex config follows the official contract and applies only minimal merges to `<codex-user-root>/config.toml` or `<project>/.codex/config.toml`.
 Install preserves existing settings and only applies `features.multi_agent = true`, `agents.max_depth = 1`, and `agents.max_threads = 200`.
+An empty interactive root input keeps the default `~/.codex` target.
+Alternate-root installs isolate managed agents, `AGENTS.md`, `config.toml`, bootstrap state, and optional desktop notification assets under that selected root only.
+Alternate-root verification reports install-state health for the selected root only and does not claim runtime profile activation.
 Codex CLI uses the `name` field in each TOML as the custom agent name.
 The root `AGENTS.md` 480ai managed block uses the architect main prompt body verbatim.
 This architect workflow is for the root Codex session only. Spawned `480-developer`/reviewer/scanner sessions must ignore those architect-only rules and follow their own custom agent instructions.

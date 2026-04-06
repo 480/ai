@@ -11,9 +11,9 @@ Install the five 480 agents into OpenCode, Claude Code, and Codex CLI to get a d
 
 ## Providers
 
-- OpenCode: User-scope install; enables `480-architect` by default, desktop notifications optional.
-- Claude Code: User/project-scope install; `480-architect` optional, and installer prompts to set the experimental agent teams + desktop notification flags in `settings.json`.
-- Codex CLI: User/project-scope install; root `AGENTS.md` 480ai block provides architect + 4 subagents, review is `480-code-reviewer` + `480-code-reviewer2`, and install writes `features.multi_agent`, `agents.max_depth`, `agents.max_threads` plus optional desktop notifications to `config.toml`.
+- OpenCode: user-scope install; enables `480-architect` by default, desktop notifications optional.
+- Claude Code: user/project-scope install; `480-architect` optional, and the installer asks whether to merge the experimental agent teams + desktop notification flags into the `env` section of `settings.json`.
+- Codex CLI: user/project-scope install; root `AGENTS.md` 480ai block provides architect + 4 subagents, review is `480-code-reviewer` + `480-code-reviewer2`, install writes `features.multi_agent`, `agents.max_depth = 1`, `agents.max_threads = 200` plus optional desktop notifications to `config.toml`, and Codex user scope defaults to `~/.codex` but can target an alternate root such as `~/.codex-harness` with `--codex-user-root` or `BOOTSTRAP_CODEX_USER_ROOT`.
 
 ## Install
 
@@ -22,12 +22,15 @@ sh -c "$(curl -fsSL https://raw.githubusercontent.com/480/ai/main/bootstrap/inst
 ```
 
 This opens a TUI that lets you select multiple providers together.
+For Codex user scope, interactive install accepts an optional custom user root. An empty root input keeps the default `~/.codex` target, and alternate-root installs isolate managed artifacts only; they do not switch the active Codex runtime profile.
 
 ## Uninstall
 
 ```bash
 curl -fsSL "https://raw.githubusercontent.com/480/ai/main/bootstrap/uninstall-remote.sh" | sh
 ```
+
+Codex uninstall and verify accept the same optional `--codex-user-root` / `BOOTSTRAP_CODEX_USER_ROOT` override when you need to operate on an alternate user root instead of `~/.codex`.
 
 ## License
 

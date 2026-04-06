@@ -156,6 +156,7 @@ class InstallationTests(unittest.TestCase):
         provider_label: str,
         scope: str,
         activate_default: bool | None,
+        codex_user_root: str | None = None,
         desktop_notifications: bool | None = None,
         model_mode: str,
     ) -> None:
@@ -163,6 +164,10 @@ class InstallationTests(unittest.TestCase):
         summary = "\n".join(provider_block)
         self.assertIn(f"- {provider_label}:", provider_block[0])
         self.assertIn(f"scope={scope}", provider_block[0])
+        if codex_user_root is not None:
+            self.assertIn(f"user root: {codex_user_root}", summary)
+        else:
+            self.assertNotIn("user root:", summary)
         if activate_default is not None:
             self.assertIn(f"default activation: {'yes' if activate_default else 'no'}", summary)
         else:
@@ -743,6 +748,18 @@ class InstallationTests(unittest.TestCase):
             assert activation is not None
             self.assertEqual(activation.config_key, "agent")
             self.assertEqual(activation.managed_value, "480-architect")
+
+    def test_codex_user_target_resolver_accepts_alternate_root_override(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            alternate_root = home / ".codex-harness"
+
+            target = resolve_install_target("codex", "user", home=home, user_root_override=alternate_root)
+
+            self.assertEqual(target.paths.config_dir, alternate_root)
+            self.assertEqual(target.paths.config_file, alternate_root / "config.toml")
+            self.assertEqual(target.paths.installed_agents_dir, alternate_root / "agents")
+            self.assertEqual(target.paths.state_dir, alternate_root / ".480ai-bootstrap")
 
     def test_claude_project_target_resolver_uses_project_local_settings_and_external_state(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1779,6 +1796,33 @@ manage_agents.install(target="codex", scope="user")
             self.assertIn("codex binary not found", result["exec_path_result"]["error"])
             self.assertEqual(result["final_classification"], "platform_blocker")
 
+    def test_codex_verify_skips_runtime_validation_for_alternate_root(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            alternate_root = home / ".codex-harness"
+            with self.patched_manage_agents_home(home):
+                self.run_command(
+                    home,
+                    "install",
+                    "--target",
+                    "codex",
+                    "--scope",
+                    "user",
+                    "--codex-user-root",
+                    str(alternate_root),
+                )
+
+                with mock.patch.object(manage_agents.subprocess, "run") as run_mock:
+                    result = manage_agents.verify(target="codex", scope="user", codex_user_root=alternate_root)
+
+            run_mock.assert_not_called()
+            self.assertEqual(result["target_root"], str(alternate_root))
+            self.assertEqual(result["install_state"]["status"], "ok")
+            self.assertEqual(result["cleanup_result"]["status"], "ok")
+            self.assertEqual(result["exec_path_result"]["status"], "skipped")
+            self.assertEqual(result["general_session_validation"]["status"], "skipped")
+            self.assertEqual(result["final_classification"], "success")
+
     def test_codex_verify_honors_persisted_advanced_model_selection(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp)
@@ -2048,6 +2092,47 @@ manage_agents.install(target="codex", scope="user")
             self.run_command(home, "uninstall", "--target", "codex", "--scope", "user")
 
             self.assertEqual(config_path.read_text(encoding="utf-8"), original)
+
+    def test_codex_alternate_user_root_install_and_uninstall_stay_isolated_from_default_root(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            default_root = home / ".codex"
+            alternate_root = home / ".codex-harness"
+            default_root.mkdir(parents=True, exist_ok=True)
+            (default_root / "config.toml").write_text('model = "gpt-5.4"\n', encoding="utf-8")
+
+            self.run_command(
+                home,
+                "install",
+                "--target",
+                "codex",
+                "--scope",
+                "user",
+                "--codex-user-root",
+                str(alternate_root),
+            )
+
+            self.assertTrue((alternate_root / "AGENTS.md").exists())
+            self.assertTrue((alternate_root / "config.toml").exists())
+            self.assertTrue((alternate_root / ".480ai-bootstrap" / "state.json").exists())
+            self.assertFalse((default_root / "AGENTS.md").exists())
+            self.assertEqual((default_root / "config.toml").read_text(encoding="utf-8"), 'model = "gpt-5.4"\n')
+
+            self.run_command(
+                home,
+                "uninstall",
+                "--target",
+                "codex",
+                "--scope",
+                "user",
+                "--codex-user-root",
+                str(alternate_root),
+            )
+
+            self.assertFalse((alternate_root / "AGENTS.md").exists())
+            self.assertFalse((alternate_root / ".480ai-bootstrap" / "state.json").exists())
+            self.assertFalse((alternate_root / "agents").exists())
+            self.assertEqual((default_root / "config.toml").read_text(encoding="utf-8"), 'model = "gpt-5.4"\n')
 
     def test_codex_user_uninstall_preserves_user_modified_managed_settings(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -3107,6 +3192,21 @@ manage_agents.install(target="codex", scope="user")
         self.assertNotIn("Activate the default agent now?", stdout.getvalue())
         self.assertNotIn("agent teams experimental flag", stdout.getvalue())
 
+    def test_prompt_install_options_collects_optional_codex_user_root(self) -> None:
+        stdin = TTYStringIO("3\n1\n~/.codex-harness\n\n\n")
+        stdout = TTYStringIO()
+
+        with self.patched_detected_interactive_providers("opencode", "claude", "codex"):
+            install_options = manage_agents.prompt_install_options(
+                input_stream=stdin,
+                output=stdout,
+            )
+
+        request = install_options.providers[0]
+        self.assertEqual((request.target, request.scope), ("codex", "user"))
+        self.assertEqual(request.codex_user_root, Path.home() / ".codex-harness")
+        self.assertIn("Optional custom Codex user root", stdout.getvalue())
+
     def test_prompt_install_options_shows_teams_prompt_only_for_claude(self) -> None:
         stdin = TTYStringIO("2\n\n\n\n\n\n")
         stdout = TTYStringIO()
@@ -3484,8 +3584,9 @@ manage_agents.install(target="codex", scope="user")
                 ),
                 manage_agents.ProviderInstallRequest(
                     target="codex",
-                    scope="project",
+                    scope="user",
                     activate_default=None,
+                    codex_user_root=Path("/tmp/.codex-harness"),
                     desktop_notifications=False,
                     model_selection=self.advanced_selection("codex", **{"480-architect": "spark-high"}),
                 ),
@@ -3512,8 +3613,9 @@ manage_agents.install(target="codex", scope="user")
         self.assert_summary_contains_provider(
             lines,
             provider_label="Codex CLI",
-            scope="project",
+            scope="user",
             activate_default=None,
+            codex_user_root="/tmp/.codex-harness",
             desktop_notifications=False,
             model_mode="advanced",
         )
@@ -3679,6 +3781,36 @@ manage_agents.install(target="codex", scope="user")
         self.assertEqual(model_selection.role_options["480-architect"], "spark-high")
         self.assertEqual(model_selection.role_options["480-developer"], "gpt-5.4-medium")
 
+    def test_install_main_passes_codex_user_root_from_env_without_prompting(self) -> None:
+        stdin = TTYStringIO()
+        stdout = TTYStringIO()
+
+        with (
+            mock.patch.object(manage_agents.sys, "stdin", stdin),
+            mock.patch.object(manage_agents.sys, "stdout", stdout),
+            mock.patch.dict(
+                os.environ,
+                {
+                    "BOOTSTRAP_TARGET": "codex",
+                    "BOOTSTRAP_SCOPE": "user",
+                    "BOOTSTRAP_CODEX_USER_ROOT": "~/.codex-harness",
+                },
+                clear=True,
+            ),
+            mock.patch.object(manage_agents, "install") as install_mock,
+            mock.patch.object(manage_agents, "prompt_install_options") as prompt_mock,
+        ):
+            result = manage_agents.main(["manage_agents.py", "install"])
+
+        self.assertEqual(result, 0)
+        prompt_mock.assert_not_called()
+        install_mock.assert_called_once_with(
+            target="codex",
+            scope="user",
+            activate_default=None,
+            codex_user_root=Path.home() / ".codex-harness",
+        )
+
     def test_parse_role_model_choice_entries_preserves_reviewer2_mini_high_and_migrates_removed_scanner_mini_keys(self) -> None:
         parsed = manage_agents.parse_role_model_choice_entries(
             [
@@ -3757,6 +3889,24 @@ manage_agents.install(target="codex", scope="user")
         self.assertEqual(result, 0)
         uninstall_mock.assert_called_once_with(target="codex", scope="project")
 
+    def test_uninstall_main_passes_codex_user_root_from_env(self) -> None:
+        with (
+            mock.patch.dict(
+                os.environ,
+                {
+                    "BOOTSTRAP_TARGET": "codex",
+                    "BOOTSTRAP_SCOPE": "user",
+                    "BOOTSTRAP_CODEX_USER_ROOT": "~/.codex-harness",
+                },
+                clear=True,
+            ),
+            mock.patch.object(manage_agents, "uninstall") as uninstall_mock,
+        ):
+            result = manage_agents.main(["manage_agents.py", "uninstall"])
+
+        self.assertEqual(result, 0)
+        uninstall_mock.assert_called_once_with(target="codex", scope="user", codex_user_root=Path.home() / ".codex-harness")
+
     def test_verify_main_serializes_verify_output(self) -> None:
         fake_result = {
             "install_state": {"status": "ok"},
@@ -3803,6 +3953,31 @@ manage_agents.install(target="codex", scope="user")
 
         self.assertEqual(result, 0)
         verify_mock.assert_called_once_with(target="codex", scope="user")
+        self.assertEqual(json.loads(stdout.getvalue()), fake_result)
+
+    def test_verify_main_accepts_codex_user_root_override(self) -> None:
+        fake_result = {
+            "target_root": "/tmp/.codex-harness",
+            "install_state": {"status": "ok"},
+            "cleanup_result": {"status": "ok"},
+            "general_session_validation": {"status": "skipped"},
+            "exec_path_result": {"status": "skipped"},
+            "final_classification": "success",
+        }
+        stdout = io.StringIO()
+
+        with (
+            mock.patch.object(manage_agents, "verify", return_value=fake_result) as verify_mock,
+            redirect_stdout(stdout),
+        ):
+            result = manage_agents.main(["manage_agents.py", "verify", "--codex-user-root", "~/.codex-harness"])
+
+        self.assertEqual(result, 0)
+        verify_mock.assert_called_once_with(
+            target="codex",
+            scope="user",
+            codex_user_root=Path.home() / ".codex-harness",
+        )
         self.assertEqual(json.loads(stdout.getvalue()), fake_result)
 
     def test_install_sh_forwards_noninteractive_cli_args(self) -> None:
@@ -4966,6 +5141,9 @@ manage_agents.install(target="codex", scope="user")
         self.assertIn("config.toml", codex_line.group(0))
         self.assertIn("agents.max_depth = 1", codex_line.group(0))
         self.assertIn("agents.max_threads = 200", codex_line.group(0))
+        self.assertIn("`~/.codex`", codex_line.group(0))
+        self.assertIn("`--codex-user-root`", codex_line.group(0))
+        self.assertIn("`BOOTSTRAP_CODEX_USER_ROOT`", codex_line.group(0))
         self.assertNotRegex(codex_line.group(0), r"480-architect.*enabled|enabled.*480-architect")
 
     def test_opencode_index_and_architecture_docs_match_current_bootstrap_behavior(self) -> None:
@@ -4999,11 +5177,17 @@ manage_agents.install(target="codex", scope="user")
         self.assertIn("`providers/codex/instructions/480-architect.md`", codex_index)
         self.assertIn("there is no separate architect custom agent", codex_index)
         self.assertIn("Codex custom agents provide only the four subagents below.", codex_index)
-        self.assertIn("`~/.codex/config.toml` or `<project>/.codex/config.toml`", codex_index)
+        self.assertIn("`BOOTSTRAP_CODEX_USER_ROOT`", codex_index)
+        self.assertIn("`--codex-user-root`", codex_index)
+        self.assertIn("`~/.codex-harness`", codex_index)
+        self.assertIn("<codex-user-root>/config.toml", codex_index)
         self.assertIn(
             "Install preserves existing settings and only applies `features.multi_agent = true`, `agents.max_depth = 1`, and `agents.max_threads = 200`.",
             codex_index,
         )
+        self.assertIn("An empty interactive root input keeps the default `~/.codex` target.", codex_index)
+        self.assertIn("Alternate-root installs isolate managed agents, `AGENTS.md`, `config.toml`, bootstrap state, and optional desktop notification assets under that selected root only.", codex_index)
+        self.assertIn("Alternate-root verification reports install-state health for the selected root only and does not claim runtime profile activation.", codex_index)
         self.assertIn(
             "This architect workflow is for the root Codex session only. Spawned `480-developer`/reviewer/scanner sessions must ignore those architect-only rules and follow their own custom agent instructions.",
             codex_index,
