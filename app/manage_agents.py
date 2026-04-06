@@ -1230,12 +1230,10 @@ def resolve_install_options_from_inputs(
     if raw_codex_user_root is not None:
         codex_user_root = normalize_codex_user_root(raw_codex_user_root, source="--codex-user-root")
         codex_user_root = codex_user_root_for_request(target=target, scope=scope, codex_user_root=codex_user_root)
-    elif request_targets_codex_user_scope(target=target, scope=scope):
+    else:
         env_codex_user_root = env.get(CODEX_USER_ROOT_ENV)
         codex_user_root = normalize_codex_user_root(env_codex_user_root, source=CODEX_USER_ROOT_ENV)
         codex_user_root = codex_user_root_for_request(target=target, scope=scope, codex_user_root=codex_user_root)
-    else:
-        codex_user_root = None
 
     activate_default = args.activate_default
     if activate_default is None and INSTALL_ACTIVATE_DEFAULT_ENV in env:

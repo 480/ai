@@ -3902,6 +3902,28 @@ manage_agents.install(target="codex", scope="user")
 
         self.assertEqual(str(exc.exception), "Custom Codex user root is supported only for Codex user scope.")
 
+    def test_install_main_rejects_codex_user_root_env_for_noninteractive_codex_project_install(self) -> None:
+        stdin = TTYStringIO()
+        stdout = TTYStringIO()
+
+        with (
+            mock.patch.object(manage_agents.sys, "stdin", stdin),
+            mock.patch.object(manage_agents.sys, "stdout", stdout),
+            mock.patch.dict(
+                os.environ,
+                {
+                    "BOOTSTRAP_TARGET": "codex",
+                    "BOOTSTRAP_SCOPE": "project",
+                    "BOOTSTRAP_CODEX_USER_ROOT": "~/.codex-harness",
+                },
+                clear=True,
+            ),
+            self.assertRaises(SystemExit) as exc,
+        ):
+            manage_agents.main(["manage_agents.py", "install"])
+
+        self.assertEqual(str(exc.exception), "Custom Codex user root is supported only for Codex user scope.")
+
     def test_parse_role_model_choice_entries_preserves_reviewer2_mini_high_and_migrates_removed_scanner_mini_keys(self) -> None:
         parsed = manage_agents.parse_role_model_choice_entries(
             [
