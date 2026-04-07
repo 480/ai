@@ -177,16 +177,15 @@ def render_qwen_agent(
         body += "\n"
 
     mapping_line = f"Qwen Code agent name: {name} maps to role `{spec.identifier}`."
-    tools_yaml = "\n".join(f"  - {t}" for t in tools)
     front_matter = [
         "---",
         f"name: {name}",
         f"description: {spec.description}",
-        f"model: {model_profile.model}",
-        "tools:",
-        tools_yaml,
-        "---",
     ]
+    if model_profile.model != "inherit":
+        front_matter.append(f"model: {model_profile.model}")
+    tools_yaml = "\n".join(f"  - {t}" for t in tools)
+    front_matter.extend(["tools:", tools_yaml, "---"])
     return "\n".join(front_matter) + "\n" + mapping_line + "\n\n" + body
 
 

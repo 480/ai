@@ -505,11 +505,11 @@ QWEN_CODE_MODEL_SELECTION_SCHEMA = ProviderModelSelectionSchema(
     recommended=ProviderRecommendedModelProfile(
         source="fixed",
         roles={
-            "480-architect": _role_config("qwen-coder-plus", "high"),
-            "480-developer": _role_config("qwen-coder-plus", "medium"),
-            "480-code-scanner": _role_config("qwen-coder-flash", "low"),
-            "480-code-reviewer": _role_config("qwen-coder-plus", "high"),
-            "480-code-reviewer2": _role_config("qwen-coder-plus", "medium"),
+            "480-architect": _role_config("inherit", "inherit"),
+            "480-developer": _role_config("inherit", "inherit"),
+            "480-code-scanner": _role_config("inherit", "inherit"),
+            "480-code-reviewer": _role_config("inherit", "inherit"),
+            "480-code-reviewer2": _role_config("inherit", "inherit"),
         },
     ),
     advanced={
