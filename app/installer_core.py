@@ -178,6 +178,38 @@ def claude_notification(payload: dict) -> dict | None:
     }
 
 
+def qwen_notification(payload: dict) -> dict | None:
+    if payload.get("hook_event_name") != "Stop":
+        return None
+
+    cwd = payload.get("cwd") or payload.get("directory")
+    message = payload.get("message") or payload.get("final_response", "")
+    if not message:
+        message = "Qwen Code session completed"
+
+    return {
+        "title": f"Qwen Code completed ({project_name(cwd) or 'global'})",
+        "message": message,
+        "group": f"qwen:{cwd or 'global'}",
+    }
+
+
+def gemini_notification(payload: dict) -> dict | None:
+    if payload.get("hook_event_name") != "SessionEnd":
+        return None
+
+    cwd = payload.get("cwd") or payload.get("directory")
+    message = payload.get("message") or payload.get("final_response", "")
+    if not message:
+        message = "Gemini CLI session completed"
+
+    return {
+        "title": f"Gemini CLI completed ({project_name(cwd) or 'global'})",
+        "message": message,
+        "group": f"gemini:{cwd or 'global'}",
+    }
+
+
 def build_notification(source: str, payload: dict) -> dict | None:
     if source == "codex":
         return codex_notification(payload)
@@ -185,6 +217,10 @@ def build_notification(source: str, payload: dict) -> dict | None:
         return opencode_notification(payload)
     if source == "claude":
         return claude_notification(payload)
+    if source == "qwen":
+        return qwen_notification(payload)
+    if source == "gemini":
+        return gemini_notification(payload)
     return None
 
 
@@ -1056,6 +1092,153 @@ def merge_claude_desktop_notification_hook(
 
     notifications.append(hook_entry)
     return True
+
+
+# ---------------------------------------------------------------------------
+# Qwen Code & Gemini CLI desktop notification hooks
+# ---------------------------------------------------------------------------
+
+def _json_notification_hook_entry(command: str) -> dict:
+    return {
+        "type": "command",
+        "command": command,
+    }
+
+
+def _merge_json_notification_hook(
+    config: dict,
+    hook_event_key: str,
+    new_entry: dict,
+) -> bool:
+    hooks = config.get("hooks")
+    if not isinstance(hooks, dict):
+        config["hooks"] = {hook_event_key: [new_entry]}
+        return True
+    event_list = hooks.get(hook_event_key)
+    if not isinstance(event_list, list):
+        hooks[hook_event_key] = [new_entry]
+        return True
+    if new_entry in event_list:
+        return False
+    event_list.append(new_entry)
+    return True
+
+
+def _restore_json_notification_hook(
+    config: dict,
+    hook_event_key: str,
+    installed_entry: dict,
+    previous_value: object,
+    had_previous_value: bool,
+) -> bool:
+    hooks = config.get("hooks")
+    if not isinstance(hooks, dict):
+        return False
+    event_list = hooks.get(hook_event_key)
+    if not isinstance(event_list, list):
+        return False
+    if installed_entry not in event_list:
+        return False
+    event_list = [item for item in event_list if item != installed_entry]
+    if had_previous_value:
+        hooks[hook_event_key] = previous_value  # type: ignore[assignment]
+    elif event_list:
+        hooks[hook_event_key] = event_list
+    else:
+        del hooks[hook_event_key]
+        if not hooks:
+            del config["hooks"]
+    return True
+
+
+def merge_qwen_desktop_notification_hook(
+    target: InstallTarget,
+    state: dict,
+    config: dict,
+    *,
+    command: str,
+    enabled: bool,
+) -> bool:
+    if not enabled or target.name != "qwen":
+        return False
+
+    hook_entry = _json_notification_hook_entry(command)
+
+    managed_config = _managed_config_state(state)
+    if not isinstance(managed_config.get("qwen_notification"), dict):
+        hooks = config.get("hooks")
+        if isinstance(hooks, dict) and "Stop" in hooks:
+            managed_config["qwen_notification"] = {"present": True, "value": _json_value(hooks.get("Stop"))}
+        else:
+            managed_config["qwen_notification"] = {"present": False, "value": None}
+
+    return _merge_json_notification_hook(config, "Stop", hook_entry)
+
+
+def restore_qwen_desktop_notification_hook(
+    target: InstallTarget,
+    state: dict,
+    config: dict,
+    *,
+    command: str,
+) -> bool:
+    if target.name != "qwen":
+        return False
+
+    managed = _managed_config_state(state).get("qwen_notification")
+    if not isinstance(managed, dict):
+        return False
+
+    hook_entry = _json_notification_hook_entry(command)
+    had_previous = managed.get("present") is True
+    previous_value = managed.get("value")
+
+    return _restore_json_notification_hook(config, "Stop", hook_entry, previous_value, had_previous)
+
+
+def merge_gemini_desktop_notification_hook(
+    target: InstallTarget,
+    state: dict,
+    config: dict,
+    *,
+    command: str,
+    enabled: bool,
+) -> bool:
+    if not enabled or target.name != "gemini":
+        return False
+
+    hook_entry = _json_notification_hook_entry(command)
+
+    managed_config = _managed_config_state(state)
+    if not isinstance(managed_config.get("gemini_notification"), dict):
+        hooks = config.get("hooks")
+        if isinstance(hooks, dict) and "SessionEnd" in hooks:
+            managed_config["gemini_notification"] = {"present": True, "value": _json_value(hooks.get("SessionEnd"))}
+        else:
+            managed_config["gemini_notification"] = {"present": False, "value": None}
+
+    return _merge_json_notification_hook(config, "SessionEnd", hook_entry)
+
+
+def restore_gemini_desktop_notification_hook(
+    target: InstallTarget,
+    state: dict,
+    config: dict,
+    *,
+    command: str,
+) -> bool:
+    if target.name != "gemini":
+        return False
+
+    managed = _managed_config_state(state).get("gemini_notification")
+    if not isinstance(managed, dict):
+        return False
+
+    hook_entry = _json_notification_hook_entry(command)
+    had_previous = managed.get("present") is True
+    previous_value = managed.get("value")
+
+    return _restore_json_notification_hook(config, "SessionEnd", hook_entry, previous_value, had_previous)
 
 
 def restore_claude_desktop_notification_hook(
@@ -2232,6 +2415,26 @@ def install(
         )
         if desktop_notification_changed:
             write_target_config(target, config)
+    if enable_desktop_notifications is True and target.name == "qwen":
+        desktop_notification_changed = merge_qwen_desktop_notification_hook(
+            target,
+            state,
+            config,
+            command=f"{shlex.quote(str(desktop_notification_hook_path(target)))} qwen",
+            enabled=True,
+        )
+        if desktop_notification_changed:
+            write_target_config(target, config)
+    if enable_desktop_notifications is True and target.name == "gemini":
+        desktop_notification_changed = merge_gemini_desktop_notification_hook(
+            target,
+            state,
+            config,
+            command=f"{shlex.quote(str(desktop_notification_hook_path(target)))} gemini",
+            enabled=True,
+        )
+        if desktop_notification_changed:
+            write_target_config(target, config)
     if enable_desktop_notifications is False:
         if target.name == "codex":
             desktop_notification_changed = restore_codex_desktop_notification_hook(target, state, config)
@@ -2241,6 +2444,24 @@ def install(
                 state,
                 config,
                 command=f"{shlex.quote(str(desktop_notification_hook_path(target)))} claude",
+            )
+            if desktop_notification_changed:
+                write_target_config(target, config)
+        elif target.name == "qwen":
+            desktop_notification_changed = restore_qwen_desktop_notification_hook(
+                target,
+                state,
+                config,
+                command=f"{shlex.quote(str(desktop_notification_hook_path(target)))} qwen",
+            )
+            if desktop_notification_changed:
+                write_target_config(target, config)
+        elif target.name == "gemini":
+            desktop_notification_changed = restore_gemini_desktop_notification_hook(
+                target,
+                state,
+                config,
+                command=f"{shlex.quote(str(desktop_notification_hook_path(target)))} gemini",
             )
             if desktop_notification_changed:
                 write_target_config(target, config)
