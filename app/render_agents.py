@@ -155,6 +155,77 @@ def render_claude_agent(
     return "\n".join(front_matter) + "\n" + mapping_line + "\n\n" + body
 
 
+def render_qwen_agent(
+    spec: AgentSpec,
+    qwen_name_map: dict[str, str],
+    model_selection: ProviderModelSelection | None = None,
+) -> str:
+    provider = get_provider("qwen")
+    metadata = spec.metadata_for_target("qwen")
+    name = metadata.get("name")
+    if not isinstance(name, str) or not name:
+        raise ValueError(f"Invalid Qwen Code agent name for {spec.identifier}.")
+
+    tools = metadata.get("tools")
+    if not isinstance(tools, list) or not tools or not all(isinstance(tool, str) and tool for tool in tools):
+        raise ValueError(f"Invalid Qwen Code tools for {spec.identifier}.")
+
+    model_profile = provider.resolve_role_model_config(spec, model_selection=model_selection)
+
+    body = _replace_agent_names(spec.instruction_source_for_target("qwen").read_text(encoding="utf-8"), qwen_name_map)
+    if not body.endswith("\n"):
+        body += "\n"
+
+    mapping_line = f"Qwen Code agent name: {name} maps to role `{spec.identifier}`."
+    tools_yaml = "\n".join(f"  - {t}" for t in tools)
+    front_matter = [
+        "---",
+        f"name: {name}",
+        f"description: {spec.description}",
+        f"model: {model_profile.model}",
+        "tools:",
+        tools_yaml,
+        "---",
+    ]
+    return "\n".join(front_matter) + "\n" + mapping_line + "\n\n" + body
+
+
+def render_gemini_agent(
+    spec: AgentSpec,
+    gemini_name_map: dict[str, str],
+    model_selection: ProviderModelSelection | None = None,
+) -> str:
+    provider = get_provider("gemini")
+    metadata = spec.metadata_for_target("gemini")
+    name = metadata.get("name")
+    if not isinstance(name, str) or not name:
+        raise ValueError(f"Invalid Gemini CLI agent name for {spec.identifier}.")
+
+    tools = metadata.get("tools")
+    if tools is not None:
+        if not isinstance(tools, list) or not tools or not all(isinstance(tool, str) and tool for tool in tools):
+            raise ValueError(f"Invalid Gemini CLI tools for {spec.identifier}.")
+
+    model_profile = provider.resolve_role_model_config(spec, model_selection=model_selection)
+
+    body = _replace_agent_names(spec.instruction_source_for_target("gemini").read_text(encoding="utf-8"), gemini_name_map)
+    if not body.endswith("\n"):
+        body += "\n"
+
+    mapping_line = f"Gemini CLI agent name: {name} maps to role `{spec.identifier}`."
+    front_matter = [
+        "---",
+        f"name: {name}",
+        f"description: {spec.description}",
+        f"model: {model_profile.model}",
+    ]
+    if tools:
+        tools_yaml = "\n".join(f"  - {t}" for t in tools)
+        front_matter.extend(["tools:", tools_yaml])
+    front_matter.append("---")
+    return "\n".join(front_matter) + "\n" + mapping_line + "\n\n" + body
+
+
 def render_codex_agent(
     spec: AgentSpec,
     codex_name_map: dict[str, str],
@@ -492,6 +563,166 @@ def render_codex_agents_index(
     return "\n".join(lines)
 
 
+def render_qwen_agents_index(
+    specs: tuple[AgentSpec, ...],
+    model_selection: ProviderModelSelection | None = None,
+) -> str:
+    qwen_name_map = _provider_name_map("qwen", specs)
+    primary = [spec for spec in specs if spec.mode == "primary"]
+    subagents = [spec for spec in specs if spec.mode == "subagent"]
+
+    lines = [
+        "# Qwen Code Agents",
+        "",
+        "Documentation for the checked-in Qwen Code artifacts and install behavior.",
+        "",
+        "## Name mapping",
+        "",
+    ]
+
+    for spec in specs:
+        qwen_name = qwen_name_map[spec.identifier]
+        lines.append(f"- `{spec.identifier}` -> `{qwen_name}` (`providers/qwen/agents/{qwen_name}.md`)")
+
+    lines.extend(["", "## Primary", ""])
+    for spec in primary:
+        model_profile = _model_profile_for_provider("qwen", spec, model_selection)
+        lines.extend(
+            [
+                f"- `{qwen_name_map[spec.identifier]}`",
+                f"  - maps from: `{spec.identifier}`",
+                f"  - file: `providers/qwen/agents/{qwen_name_map[spec.identifier]}.md`",
+                f"  - model: `{model_profile.model}`",
+                "",
+            ]
+        )
+
+    lines.extend(["## Subagents", ""])
+    for spec in subagents:
+        model_profile = _model_profile_for_provider("qwen", spec, model_selection)
+        lines.extend(
+            [
+                f"- `{qwen_name_map[spec.identifier]}`",
+                f"  - maps from: `{spec.identifier}`",
+                f"  - file: `providers/qwen/agents/{qwen_name_map[spec.identifier]}.md`",
+                f"  - model: `{model_profile.model}`",
+                "",
+            ]
+        )
+
+    lines.extend(
+        [
+            "## Install names and paths",
+            "",
+            "Install files use the Qwen Code-specific names above and are copied to `~/.qwen/agents/` or `<project>/.qwen/agents/`.",
+            "Recommended installs use the checked-in artifacts in `providers/qwen/agents/` as-is.",
+            "Advanced installs render temporary artifacts from the selected model combination and copy them to the same install path.",
+            "",
+            "## Default behavior",
+            "",
+            "- Default activation is optional and only sets `default_agent` to `480-architect` when `--activate-default` is used.",
+            "- Uninstall restores the previous value only when the current `default_agent` is still `480-architect`.",
+            "",
+            "## Source of truth",
+            "",
+            "- Common agent definitions: `bundles/common/agents.json`.",
+            "- Default instruction bodies: `bundles/common/instructions/`.",
+            "- Qwen provider-specific override bodies, if any: `providers/qwen/instructions/`.",
+            "- Provider install paths and model-selection schema: `app/providers.py`.",
+            "- Provider artifact rendering: `app/render_agents.py`.",
+            "- Install/uninstall entrypoint: `app/manage_agents.py`.",
+            "- State storage and restore: `app/installer_core.py`.",
+            "- User guidance: `README.md`.",
+            "",
+        ]
+    )
+
+    return "\n".join(lines)
+
+
+def render_gemini_agents_index(
+    specs: tuple[AgentSpec, ...],
+    model_selection: ProviderModelSelection | None = None,
+) -> str:
+    gemini_name_map = _provider_name_map("gemini", specs)
+    primary = [spec for spec in specs if spec.mode == "primary"]
+    subagents = [spec for spec in specs if spec.mode == "subagent"]
+
+    lines = [
+        "# Gemini CLI Agents",
+        "",
+        "Documentation for the checked-in Gemini CLI artifacts and install behavior.",
+        "",
+        "## Name mapping",
+        "",
+    ]
+
+    for spec in specs:
+        gemini_name = gemini_name_map[spec.identifier]
+        lines.append(f"- `{spec.identifier}` -> `{gemini_name}` (`providers/gemini/agents/{gemini_name}.md`)")
+
+    lines.extend(["", "## Primary", ""])
+    for spec in primary:
+        model_profile = _model_profile_for_provider("gemini", spec, model_selection)
+        lines.extend(
+            [
+                f"- `{gemini_name_map[spec.identifier]}`",
+                f"  - maps from: `{spec.identifier}`",
+                f"  - file: `providers/gemini/agents/{gemini_name_map[spec.identifier]}.md`",
+                f"  - model: `{model_profile.model}`",
+                "",
+            ]
+        )
+
+    lines.extend(["## Subagents", ""])
+    for spec in subagents:
+        model_profile = _model_profile_for_provider("gemini", spec, model_selection)
+        lines.extend(
+            [
+                f"- `{gemini_name_map[spec.identifier]}`",
+                f"  - maps from: `{spec.identifier}`",
+                f"  - file: `providers/gemini/agents/{gemini_name_map[spec.identifier]}.md`",
+                f"  - model: `{model_profile.model}`",
+                "",
+            ]
+        )
+
+    lines.extend(
+        [
+            "## Install names and paths",
+            "",
+            "Install files use the Gemini CLI-specific names above and are copied to `~/.gemini/agents/` or `<project>/.gemini/agents/`.",
+            "Recommended installs use the checked-in artifacts in `providers/gemini/agents/` as-is.",
+            "Advanced installs render temporary artifacts from the selected model combination and copy them to the same install path.",
+            "",
+            "## Default behavior",
+            "",
+            "- Default activation is optional and only sets `default_agent` to `480-architect` when `--activate-default` is used.",
+            "- Uninstall restores the previous value only when the current `default_agent` is still `480-architect`.",
+            "",
+            "## Subagent support",
+            "",
+            "- Gemini CLI subagents are experimental and require `{\"experimental\": {{\"enableSubagents\": true}}}` in `settings.json`.",
+            "- Agents are discovered from `.gemini/agents/` (project) and `~/.gemini/agents/` (user) directories.",
+            "- The main Gemini CLI automatically routes tasks to subagents based on their `description` field.",
+            "",
+            "## Source of truth",
+            "",
+            "- Common agent definitions: `bundles/common/agents.json`.",
+            "- Default instruction bodies: `bundles/common/instructions/`.",
+            "- Gemini provider-specific override bodies, if any: `providers/gemini/instructions/`.",
+            "- Provider install paths and model-selection schema: `app/providers.py`.",
+            "- Provider artifact rendering: `app/render_agents.py`.",
+            "- Install/uninstall entrypoint: `app/manage_agents.py`.",
+            "- State storage and restore: `app/installer_core.py`.",
+            "- User guidance: `README.md`.",
+            "",
+        ]
+    )
+
+    return "\n".join(lines)
+
+
 def _render_provider_agent(
     target: str,
     spec: AgentSpec,
@@ -504,6 +735,10 @@ def _render_provider_agent(
         return render_claude_agent(spec, name_map, model_selection=model_selection)
     if target == "codex":
         return render_codex_agent(spec, name_map, model_selection=model_selection)
+    if target == "qwen":
+        return render_qwen_agent(spec, name_map, model_selection=model_selection)
+    if target == "gemini":
+        return render_gemini_agent(spec, name_map, model_selection=model_selection)
     raise ValueError(f"Unsupported provider renderer: {target}")
 
 
@@ -518,6 +753,10 @@ def _render_provider_index(
         return render_claude_agents_index(specs, model_selection=model_selection)
     if target == "codex":
         return render_codex_agents_index(specs, model_selection=model_selection)
+    if target == "qwen":
+        return render_qwen_agents_index(specs, model_selection=model_selection)
+    if target == "gemini":
+        return render_gemini_agents_index(specs, model_selection=model_selection)
     raise ValueError(f"Unsupported provider index renderer: {target}")
 
 

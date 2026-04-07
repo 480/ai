@@ -3,7 +3,9 @@
   "targets": [
     "opencode",
     "claude",
-    "codex"
+    "codex",
+    "qwen",
+    "gemini"
   ],
   "roles": [
     {
@@ -42,6 +44,21 @@
           "name": "480",
           "instruction_source": "providers/codex/instructions/480-architect.md",
           "sandbox_mode": "workspace-write"
+        },
+        "qwen": {
+          "name": "480-architect",
+          "tools": [
+            "run_shell_command",
+            "read_file",
+            "write_file",
+            "edit_file",
+            "grep",
+            "glob",
+            "web_fetch"
+          ]
+        },
+        "gemini": {
+          "name": "480-architect"
         }
       }
     },
@@ -79,6 +96,21 @@
           "name": "480-developer",
           "instruction_source": "providers/codex/instructions/480-developer.md",
           "sandbox_mode": "workspace-write"
+        },
+        "qwen": {
+          "name": "480-developer",
+          "tools": [
+            "run_shell_command",
+            "read_file",
+            "write_file",
+            "edit_file",
+            "grep",
+            "glob",
+            "web_fetch"
+          ]
+        },
+        "gemini": {
+          "name": "480-developer"
         }
       }
     },
@@ -113,6 +145,18 @@
           "name": "480-code-reviewer",
           "instruction_source": "providers/codex/instructions/480-code-reviewer.md",
           "sandbox_mode": "read-only"
+        },
+        "qwen": {
+          "name": "480-code-reviewer",
+          "tools": [
+            "read_file",
+            "glob",
+            "grep",
+            "run_shell_command"
+          ]
+        },
+        "gemini": {
+          "name": "480-code-reviewer"
         }
       }
     },
@@ -147,6 +191,18 @@
           "name": "480-code-reviewer2",
           "instruction_source": "providers/codex/instructions/480-code-reviewer2.md",
           "sandbox_mode": "read-only"
+        },
+        "qwen": {
+          "name": "480-code-reviewer2",
+          "tools": [
+            "read_file",
+            "glob",
+            "grep",
+            "run_shell_command"
+          ]
+        },
+        "gemini": {
+          "name": "480-code-reviewer2"
         }
       }
     },
@@ -181,6 +237,18 @@
           "name": "480-code-scanner",
           "instruction_source": "providers/codex/instructions/480-code-scanner.md",
           "sandbox_mode": "workspace-write"
+        },
+        "qwen": {
+          "name": "480-code-scanner",
+          "tools": [
+            "read_file",
+            "glob",
+            "grep",
+            "run_shell_command"
+          ]
+        },
+        "gemini": {
+          "name": "480-code-scanner"
         }
       }
     }
