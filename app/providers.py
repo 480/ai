@@ -586,11 +586,11 @@ GEMINI_MODEL_SELECTION_SCHEMA = ProviderModelSelectionSchema(
     recommended=ProviderRecommendedModelProfile(
         source="fixed",
         roles={
-            "480-architect": _role_config("gemini-2.5-pro", "high"),
-            "480-developer": _role_config("gemini-2.5-pro", "medium"),
-            "480-code-scanner": _role_config("gemini-2.5-flash-lite", "low"),
-            "480-code-reviewer": _role_config("gemini-2.5-pro", "high"),
-            "480-code-reviewer2": _role_config("gemini-2.5-flash", "medium"),
+            "480-architect": _role_config("inherit", "inherit"),
+            "480-developer": _role_config("inherit", "inherit"),
+            "480-code-scanner": _role_config("inherit", "inherit"),
+            "480-code-reviewer": _role_config("inherit", "inherit"),
+            "480-code-reviewer2": _role_config("inherit", "inherit"),
         },
     ),
     advanced={

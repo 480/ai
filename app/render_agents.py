@@ -216,8 +216,9 @@ def render_gemini_agent(
         "---",
         f"name: {name}",
         f"description: {spec.description}",
-        f"model: {model_profile.model}",
     ]
+    if model_profile.model != "inherit":
+        front_matter.append(f"model: {model_profile.model}")
     if tools:
         tools_yaml = "\n".join(f"  - {t}" for t in tools)
         front_matter.extend(["tools:", tools_yaml])
