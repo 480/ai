@@ -2,7 +2,7 @@
 
 > Internal use only: this repository is currently intended for Imweb employees.
 
-Install the five 480 agents into OpenCode, Claude Code, and Codex CLI to get a development agent set optimized for the plan -> implement -> review loop.
+Install the five 480 agents into OpenCode, Claude Code, Codex CLI, Qwen Code, and Gemini CLI to get a development agent set optimized for the plan -> implement -> review loop.
 
 ## What are the 480 agents?
 
@@ -14,6 +14,8 @@ Install the five 480 agents into OpenCode, Claude Code, and Codex CLI to get a d
 - OpenCode: user-scope install; enables `480-architect` by default, desktop notifications optional.
 - Claude Code: user/project-scope install; `480-architect` optional, and the installer asks whether to merge the experimental agent teams + desktop notification flags into the `env` section of `settings.json`.
 - Codex CLI: user/project-scope install; root `AGENTS.md` 480ai block provides architect + 4 subagents, review is `480-code-reviewer` + `480-code-reviewer2`, install writes `features.multi_agent`, `agents.max_depth = 1`, `agents.max_threads = 200` plus optional desktop notifications to `config.toml`, and Codex user scope defaults to `~/.codex` but can target an alternate root such as `~/.codex-harness` with `--codex-user-root` or `BOOTSTRAP_CODEX_USER_ROOT`.
+- Qwen Code: user/project-scope install; uses YAML frontmatter + Markdown body subagent format, copies agents to `~/.qwen/agents/` or `<project>/.qwen/agents/`, `480-architect` optional via `default_agent` setting.
+- Gemini CLI: user/project-scope install; uses YAML frontmatter + Markdown body subagent format (same as Qwen Code), copies agents to `~/.gemini/agents/` or `<project>/.gemini/agents/`, subagents are experimental and require `{"experimental": {"enableSubagents": true}}` in `settings.json`.
 
 ## Install
 
