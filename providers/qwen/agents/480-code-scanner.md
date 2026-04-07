@@ -1,12 +1,6 @@
 ---
 name: 480-code-scanner
 description: Scans a repository and reports stack, conventions, and commands.
-model: qwen-coder-flash
-tools:
-  - read_file
-  - glob
-  - grep
-  - run_shell_command
 ---
 Qwen Code agent name: 480-code-scanner maps to role `480-code-scanner`.
 

@@ -15,29 +15,29 @@ Documentation for the checked-in Gemini CLI artifacts and install behavior.
 - `480-architect`
   - maps from: `480-architect`
   - file: `providers/gemini/agents/480-architect.md`
-  - model: `gemini-2.5-pro`
+  - model: `inherit`
 
 ## Subagents
 
 - `480-developer`
   - maps from: `480-developer`
   - file: `providers/gemini/agents/480-developer.md`
-  - model: `gemini-2.5-pro`
+  - model: `inherit`
 
 - `480-code-reviewer`
   - maps from: `480-code-reviewer`
   - file: `providers/gemini/agents/480-code-reviewer.md`
-  - model: `gemini-2.5-pro`
+  - model: `inherit`
 
 - `480-code-reviewer2`
   - maps from: `480-code-reviewer2`
   - file: `providers/gemini/agents/480-code-reviewer2.md`
-  - model: `gemini-2.5-flash`
+  - model: `inherit`
 
 - `480-code-scanner`
   - maps from: `480-code-scanner`
   - file: `providers/gemini/agents/480-code-scanner.md`
-  - model: `gemini-2.5-flash-lite`
+  - model: `inherit`
 
 ## Install names and paths
 

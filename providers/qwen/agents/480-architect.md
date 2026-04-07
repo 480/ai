@@ -1,15 +1,6 @@
 ---
 name: 480-architect
 description: Architects whole implementations.
-model: qwen-coder-plus
-tools:
-  - run_shell_command
-  - read_file
-  - write_file
-  - edit_file
-  - grep
-  - glob
-  - web_fetch
 ---
 Qwen Code agent name: 480-architect maps to role `480-architect`.
 

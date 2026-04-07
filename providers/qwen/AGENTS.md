@@ -15,29 +15,29 @@ Documentation for the checked-in Qwen Code artifacts and install behavior.
 - `480-architect`
   - maps from: `480-architect`
   - file: `providers/qwen/agents/480-architect.md`
-  - model: `qwen-coder-plus`
+  - model: `inherit`
 
 ## Subagents
 
 - `480-developer`
   - maps from: `480-developer`
   - file: `providers/qwen/agents/480-developer.md`
-  - model: `qwen-coder-plus`
+  - model: `inherit`
 
 - `480-code-reviewer`
   - maps from: `480-code-reviewer`
   - file: `providers/qwen/agents/480-code-reviewer.md`
-  - model: `qwen-coder-plus`
+  - model: `inherit`
 
 - `480-code-reviewer2`
   - maps from: `480-code-reviewer2`
   - file: `providers/qwen/agents/480-code-reviewer2.md`
-  - model: `qwen-coder-plus`
+  - model: `inherit`
 
 - `480-code-scanner`
   - maps from: `480-code-scanner`
   - file: `providers/qwen/agents/480-code-scanner.md`
-  - model: `qwen-coder-flash`
+  - model: `inherit`
 
 ## Install names and paths
 

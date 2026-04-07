@@ -1,7 +1,6 @@
 ---
 name: 480-architect
 description: Architects whole implementations.
-model: gemini-2.5-pro
 ---
 Gemini CLI agent name: 480-architect maps to role `480-architect`.
 

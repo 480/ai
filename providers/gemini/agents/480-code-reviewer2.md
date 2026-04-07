@@ -1,7 +1,6 @@
 ---
 name: 480-code-reviewer2
 description: Reviews code for best practices and potential issues.
-model: gemini-2.5-flash
 ---
 Gemini CLI agent name: 480-code-reviewer2 maps to role `480-code-reviewer2`.
 

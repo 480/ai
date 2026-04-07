@@ -1,7 +1,6 @@
 ---
 description: Reviews code for best practices and potential issues.
 mode: subagent
-model: google/gemini-3-flash-preview
 reasoningEffort: high
 temperature: 0.1
 tools:

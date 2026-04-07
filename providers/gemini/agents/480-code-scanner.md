@@ -1,7 +1,6 @@
 ---
 name: 480-code-scanner
 description: Scans a repository and reports stack, conventions, and commands.
-model: gemini-2.5-flash-lite
 ---
 Gemini CLI agent name: 480-code-scanner maps to role `480-code-scanner`.
 
