@@ -1,10 +1,10 @@
-# 480 agents
+# FEZ (480, Four-Eight-Zero) agents
 
 > Internal use only: this repository is currently intended for Imweb employees.
 
-Install the five 480 agents into OpenCode, Claude Code, Codex CLI, Qwen Code, and Gemini CLI to get a development agent set optimized for the plan -> implement -> review loop.
+Install the five FEZ (480, Four-Eight-Zero) agents into OpenCode, Claude Code, Codex CLI, Qwen Code, and Gemini CLI to get a development agent set optimized for the plan -> implement -> review loop.
 
-## What are the 480 agents?
+## What are the FEZ (480, Four-Eight-Zero) agents?
 
 - Development agents optimized for the plan -> implement -> review loop
 - https://5k.gg/480ai
@@ -40,7 +40,7 @@ MIT
 
 ## Architecture
 
-The 480 agent workflow follows a short, explicit loop:
+The FEZ (480, Four-Eight-Zero) agent workflow follows a short, explicit loop:
 
 ```mermaid
 flowchart TB
