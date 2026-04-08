@@ -2,6 +2,7 @@
 name: 480-code-reviewer2
 description: Reviews code for best practices and potential issues.
 tools: Read, Glob, Grep, Bash
+model: claude-sonnet-4-6
 effort: low
 ---
 Claude Code agent name: @480-code-reviewer2 maps to role `480-code-reviewer2`.

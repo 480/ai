@@ -2,6 +2,7 @@
 name: 480-architect
 description: Architects whole implementations.
 tools: Agent(480-developer, 480-code-reviewer, 480-code-reviewer2, 480-code-scanner), Read, Write, Edit, Glob, Grep, Bash, WebFetch
+model: claude-opus-4-6
 effort: max
 ---
 Claude Code agent name: @480-architect maps to role `480-architect`.

@@ -392,17 +392,30 @@ def install_reuses_existing_model_selection(
 
 
 def load_persisted_default_activation(target: InstallTarget, *, provider: Any) -> bool:
-    if provider.default_activation is None:
-        return False
+    default_activation = provider.default_activation_default
+    fallback = bool(default_activation) if default_activation is not None else False
+
     if not target.paths.state_file.exists():
-        default_activation = provider.default_activation_default
-        return bool(default_activation) if default_activation is not None else False
+        return fallback
 
     try:
         state = read_json_object(target.paths.state_file)
     except SystemExit:
-        default_activation = provider.default_activation_default
-        return bool(default_activation) if default_activation is not None else False
+        return fallback
+
+    if target.name == "gemini" and provider.default_activation is None:
+        override_state = state.get(installer_core.GEMINI_SYSTEM_PROMPT_OVERRIDE_STATE_KEY)
+        if isinstance(override_state, dict):
+            enabled = override_state.get("enabled")
+            if isinstance(enabled, bool):
+                return enabled
+        # Back-compat: older Gemini installs persisted activation via default_agent restore state.
+        # Preserve the previous choice when the system prompt override state does not exist yet.
+        return default_activation_enabled(state)
+
+    if provider.default_activation is None:
+        return fallback
+
     return default_activation_enabled(state)
 
 
@@ -787,7 +800,10 @@ def build_install_summary_lines(requests: tuple[ProviderInstallRequest, ...]) ->
             )
         if request.activate_default is not None:
             activation = "yes" if request.activate_default else "no"
-            lines.append(f"  default activation: {activation}")
+            if request.target == "gemini":
+                lines.append(f"  system prompt override (GEMINI_SYSTEM_MD=1): {activation}")
+            else:
+                lines.append(f"  default activation: {activation}")
         if request.enable_teams is not None:
             teams_enabled = "yes" if request.enable_teams else "no"
             lines.append(f"  agent teams: {teams_enabled}")
@@ -910,9 +926,12 @@ def prompt_install_options_tui() -> InstallOptions:
                     if target == "codex" and selection != "user":
                         state["codex_user_root"] = ""
                 elif current_step == "activate_default":
+                    activation_title = f"Activate the default agent for {provider.label} now?"
+                    if target == "gemini":
+                        activation_title = f"Enable the system prompt override (GEMINI_SYSTEM_MD=1) for {provider.label} now?"
                     selection = tui_prompt_single_choice(
                         screen,
-                        title=f"Activate the default agent for {provider.label} now?",
+                        title=activation_title,
                         choices=(
                             Choice(value="yes", label="Yes"),
                             Choice(value="no", label="No"),
@@ -1099,10 +1118,13 @@ def prompt_install_options_basic(
 
     activate_default = default_activation_for_target(target)
     if activate_default is not None:
+        activation_title = "Activate the default agent now?"
+        if target == "gemini":
+            activation_title = "Enable the system prompt override (GEMINI_SYSTEM_MD=1) now?"
         activate_default = prompt_bool_choice(
             output=output,
             input_stream=input_stream,
-            title="Activate the default agent now?",
+            title=activation_title,
             default=activate_default,
         )
 

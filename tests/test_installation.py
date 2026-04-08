@@ -169,9 +169,14 @@ class InstallationTests(unittest.TestCase):
         else:
             self.assertNotIn("user root:", summary)
         if activate_default is not None:
-            self.assertIn(f"default activation: {'yes' if activate_default else 'no'}", summary)
+            activation_value = "yes" if activate_default else "no"
+            if provider_label == "Gemini CLI":
+                self.assertIn(f"system prompt override (GEMINI_SYSTEM_MD=1): {activation_value}", summary)
+            else:
+                self.assertIn(f"default activation: {activation_value}", summary)
         else:
             self.assertNotIn("default activation:", summary)
+            self.assertNotIn("system prompt override (GEMINI_SYSTEM_MD=1):", summary)
         if desktop_notifications is not None:
             self.assertIn(f"desktop notifications: {'yes' if desktop_notifications else 'no'}", summary)
         else:
@@ -597,19 +602,27 @@ class InstallationTests(unittest.TestCase):
     def test_provider_registry_exposes_equal_level_provider_metadata(self) -> None:
         providers = {provider.identifier: provider for provider in all_providers()}
 
-        self.assertEqual(set(providers), {"opencode", "claude", "codex"})
+        self.assertEqual(set(providers), {"opencode", "claude", "codex", "qwen", "gemini"})
         self.assertEqual(providers["opencode"].cli_binary_name, "opencode")
         self.assertEqual(providers["claude"].cli_binary_name, "claude")
         self.assertEqual(providers["codex"].cli_binary_name, "codex")
+        self.assertEqual(providers["qwen"].cli_binary_name, "qwen")
+        self.assertEqual(providers["gemini"].cli_binary_name, "gemini")
         self.assertEqual(providers["opencode"].artifacts.agents_dirname, "providers/opencode/agents")
         self.assertEqual(providers["claude"].artifacts.agents_dirname, "providers/claude/agents")
         self.assertEqual(providers["codex"].artifacts.agents_dirname, "providers/codex/agents")
+        self.assertEqual(providers["qwen"].artifacts.agents_dirname, "providers/qwen/agents")
+        self.assertEqual(providers["gemini"].artifacts.agents_dirname, "providers/gemini/agents")
         self.assertEqual(providers["opencode"].supported_scopes, ("user",))
         self.assertEqual(providers["claude"].supported_scopes, ("user", "project"))
         self.assertEqual(providers["codex"].supported_scopes, ("user", "project"))
+        self.assertEqual(providers["qwen"].supported_scopes, ("user", "project"))
+        self.assertEqual(providers["gemini"].supported_scopes, ("user", "project"))
         self.assertEqual(providers["opencode"].default_activation_default, True)
         self.assertEqual(providers["claude"].default_activation_default, False)
         self.assertIsNone(providers["codex"].default_activation_default)
+        self.assertEqual(providers["qwen"].default_activation_default, False)
+        self.assertEqual(providers["gemini"].default_activation_default, False)
 
     def test_provider_model_profiles_expose_recommended_defaults_by_provider(self) -> None:
         specs = {spec.identifier: spec for spec in agent_bundle.load_bundle()}
@@ -2292,6 +2305,941 @@ manage_agents.install(target="codex", scope="user")
             self.assertEqual(restored, {"theme": "dark", "default_agent": "480-architect"})
             self.assertFalse(hook_path.exists())
             self.assertFalse(plugin_path.exists())
+
+    def test_gemini_user_install_with_desktop_notifications_restores_session_end_hook_and_agents_flag(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            config_path = home / ".gemini" / "settings.json"
+            hook_path = home / ".gemini" / ".480ai" / "desktop-notify-hook.py"
+            state_path = home / ".gemini" / ".480ai-bootstrap" / "state.json"
+            system_md_path = home / ".gemini" / "system.md"
+            dotenv_path = home / ".gemini" / ".env"
+            original = {
+                "default_agent": "custom-agent",
+                "experimental": {"enableAgents": False, "keep": "x"},
+                "hooks": {"SessionEnd": [{"type": "command", "command": "echo existing-session-end"}]},
+            }
+            self.write_json(config_path, original)
+
+            with self.patched_manage_agents_home(home):
+                manage_agents.install(
+                    target="gemini",
+                    scope="user",
+                    activate_default=True,
+                    desktop_notifications=True,
+                )
+
+                installed = self.read_json(config_path)
+                self.assertEqual(installed["default_agent"], "custom-agent")
+                self.assertTrue(installed["experimental"]["enableAgents"])
+                self.assertTrue(installed["experimental"]["enableSubagents"])
+                self.assertEqual(installed["experimental"]["keep"], "x")
+                self.assertIn("hooks", installed)
+                self.assertIn("SessionEnd", installed["hooks"])
+                installed_commands = [
+                    hook["command"]
+                    for hook in installed["hooks"]["SessionEnd"]
+                    if isinstance(hook, dict) and hook.get("type") == "command"
+                ]
+                self.assertIn(f"{hook_path} gemini", installed_commands)
+                self.assertTrue(hook_path.exists())
+                self.assertTrue(state_path.exists())
+                self.assertTrue(system_md_path.exists())
+                self.assertTrue(dotenv_path.exists())
+                self.assertIn("GEMINI_SYSTEM_MD=1", dotenv_path.read_text(encoding="utf-8"))
+
+                manage_agents.uninstall(target="gemini", scope="user")
+
+            restored = self.read_json(config_path)
+            self.assertEqual(restored, original)
+            self.assertFalse(hook_path.exists())
+            self.assertFalse(state_path.exists())
+            self.assertFalse(system_md_path.exists())
+            self.assertFalse(dotenv_path.exists())
+
+    def test_gemini_reinstall_reuses_persisted_activate_default_choice(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            config_path = home / ".gemini" / "settings.json"
+            state_path = home / ".gemini" / ".480ai-bootstrap" / "state.json"
+            system_md_path = home / ".gemini" / "system.md"
+            dotenv_path = home / ".gemini" / ".env"
+            self.write_json(config_path, {"experimental": {"enableAgents": False}})
+
+            with self.patched_manage_agents_home(home):
+                manage_agents.install(target="gemini", scope="user", activate_default=True)
+                self.assertTrue(state_path.exists())
+                self.assertTrue(system_md_path.exists())
+                self.assertTrue(dotenv_path.exists())
+
+                system_md_path.unlink()
+                dotenv_path.unlink()
+
+                manage_agents.install(target="gemini", scope="user")
+
+            self.assertTrue(system_md_path.exists())
+            self.assertTrue(dotenv_path.exists())
+            state = self.read_json(state_path)
+            self.assertEqual(state.get("gemini_system_prompt_override", {}).get("enabled"), True)
+
+    def test_gemini_legacy_activation_state_restores_default_agent_and_reuses_persisted_choice(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            config_path = home / ".gemini" / "settings.json"
+            state_path = home / ".gemini" / ".480ai-bootstrap" / "state.json"
+            system_md_path = home / ".gemini" / "system.md"
+            dotenv_path = home / ".gemini" / ".env"
+
+            self.write_json(config_path, {"default_agent": "480-architect", "experimental": {"enableAgents": False}})
+            state = installer_core.default_state(AGENTS)
+            state["previous_default_agent"] = {"present": True, "value": "legacy-custom"}
+            state["default_activation_enabled"] = True
+            self.write_json(state_path, state)
+
+            with self.patched_manage_agents_home(home):
+                manage_agents.install(target="gemini", scope="user")
+
+                self.assertTrue(system_md_path.exists())
+                self.assertTrue(dotenv_path.exists())
+                updated_state = self.read_json(state_path)
+                self.assertEqual(updated_state.get("gemini_system_prompt_override", {}).get("enabled"), True)
+
+                manage_agents.uninstall(target="gemini", scope="user")
+
+            restored = self.read_json(config_path)
+            self.assertEqual(restored.get("default_agent"), "legacy-custom")
+            self.assertEqual(restored.get("experimental", {}).get("enableAgents"), False)
+            self.assertFalse(state_path.exists())
+
+    def test_gemini_reinstall_with_non_object_managed_config_succeeds(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            config_path = home / ".gemini" / "settings.json"
+            state_path = home / ".gemini" / ".480ai-bootstrap" / "state.json"
+            system_md_path = home / ".gemini" / "system.md"
+
+            self.write_json(config_path, {"experimental": {"enableAgents": False}})
+
+            with self.patched_manage_agents_home(home):
+                manage_agents.install(target="gemini", scope="user", activate_default=True)
+                state = self.read_json(state_path)
+                state["managed_config"] = "not-a-dict"
+                self.write_json(state_path, state)
+
+                manage_agents.install(target="gemini", scope="user", activate_default=True)
+
+            self.assertTrue(system_md_path.exists())
+            updated_state = self.read_json(state_path)
+            self.assertIsInstance(updated_state.get("managed_config"), dict)
+
+    def test_gemini_activate_default_opt_out_restores_system_prompt_override_and_persists_disable(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            config_path = home / ".gemini" / "settings.json"
+            state_path = home / ".gemini" / ".480ai-bootstrap" / "state.json"
+            system_md_path = home / ".gemini" / "system.md"
+            dotenv_path = home / ".gemini" / ".env"
+            self.write_json(config_path, {"experimental": {"enableAgents": False}})
+
+            system_md_path.parent.mkdir(parents=True, exist_ok=True)
+            original_system_md = "ORIGINAL SYSTEM\n"
+            system_md_path.write_text(original_system_md, encoding="utf-8")
+            original_env = "FOO=bar\n"
+            dotenv_path.write_text(original_env, encoding="utf-8")
+
+            with self.patched_manage_agents_home(home):
+                manage_agents.install(target="gemini", scope="user", activate_default=True)
+                self.assertNotEqual(system_md_path.read_text(encoding="utf-8"), original_system_md)
+                self.assertIn("GEMINI_SYSTEM_MD=1", dotenv_path.read_text(encoding="utf-8"))
+
+                manage_agents.install(target="gemini", scope="user", activate_default=False)
+                self.assertEqual(system_md_path.read_text(encoding="utf-8"), original_system_md)
+                restored_env = dotenv_path.read_text(encoding="utf-8")
+                self.assertIn("FOO=bar", restored_env)
+                self.assertNotIn("GEMINI_SYSTEM_MD=1", restored_env)
+
+                state = self.read_json(state_path)
+                self.assertEqual(state.get("gemini_system_prompt_override", {}).get("enabled"), False)
+
+                manage_agents.install(target="gemini", scope="user")
+                self.assertEqual(system_md_path.read_text(encoding="utf-8"), original_system_md)
+                self.assertNotIn("GEMINI_SYSTEM_MD=1", dotenv_path.read_text(encoding="utf-8"))
+
+    def test_gemini_legacy_activate_default_opt_out_persists_disabled_override_state(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            config_path = home / ".gemini" / "settings.json"
+            state_path = home / ".gemini" / ".480ai-bootstrap" / "state.json"
+            system_md_path = home / ".gemini" / "system.md"
+            dotenv_path = home / ".gemini" / ".env"
+
+            self.write_json(config_path, {"default_agent": "480-architect", "experimental": {"enableAgents": False}})
+
+            system_md_path.parent.mkdir(parents=True, exist_ok=True)
+            original_system_md = "ORIGINAL SYSTEM\n"
+            system_md_path.write_text(original_system_md, encoding="utf-8")
+            original_env = "FOO=bar\n"
+            dotenv_path.write_text(original_env, encoding="utf-8")
+
+            legacy_state = installer_core.default_state(AGENTS)
+            legacy_state["previous_default_agent"] = {"present": True, "value": "legacy-custom"}
+            legacy_state["default_activation_enabled"] = True
+            self.write_json(state_path, legacy_state)
+
+            with self.patched_manage_agents_home(home):
+                manage_agents.install(target="gemini", scope="user")
+                self.assertNotEqual(system_md_path.read_text(encoding="utf-8"), original_system_md)
+                self.assertIn("GEMINI_SYSTEM_MD=1", dotenv_path.read_text(encoding="utf-8"))
+
+                manage_agents.install(target="gemini", scope="user", activate_default=False)
+                self.assertEqual(system_md_path.read_text(encoding="utf-8"), original_system_md)
+                restored_env = dotenv_path.read_text(encoding="utf-8")
+                self.assertIn("FOO=bar", restored_env)
+                self.assertNotIn("GEMINI_SYSTEM_MD=1", restored_env)
+
+                state = self.read_json(state_path)
+                self.assertEqual(state.get("gemini_system_prompt_override", {}).get("enabled"), False)
+
+                manage_agents.install(target="gemini", scope="user")
+                self.assertEqual(system_md_path.read_text(encoding="utf-8"), original_system_md)
+                self.assertNotIn("GEMINI_SYSTEM_MD=1", dotenv_path.read_text(encoding="utf-8"))
+
+    def test_gemini_restore_restores_system_prompt_from_backup_when_system_md_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            config_path = home / ".gemini" / "settings.json"
+            state_dir = home / ".gemini" / ".480ai-bootstrap"
+            state_path = state_dir / "state.json"
+            backup_path = state_dir / "system.md.orig"
+            system_md_path = home / ".gemini" / "system.md"
+
+            self.write_json(config_path, {"experimental": {"enableAgents": False}})
+
+            system_md_path.parent.mkdir(parents=True, exist_ok=True)
+            original_system_md = "ORIGINAL SYSTEM\n"
+            system_md_path.write_text(original_system_md, encoding="utf-8")
+
+            with self.patched_manage_agents_home(home):
+                manage_agents.install(target="gemini", scope="user", activate_default=True)
+                self.assertTrue(backup_path.exists())
+
+                system_md_path.unlink()
+                self.assertFalse(system_md_path.exists())
+
+                manage_agents.install(target="gemini", scope="user", activate_default=False)
+
+            self.assertTrue(system_md_path.exists())
+            self.assertEqual(system_md_path.read_text(encoding="utf-8"), original_system_md)
+            self.assertFalse(backup_path.exists())
+
+    def test_gemini_project_install_uninstall_restores_previous_config_and_agents_flag(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            project_root, _nested_dir = self.make_repo_project(home)
+            config_path = project_root / ".gemini" / "settings.json"
+            system_md_path = project_root / ".gemini" / "system.md"
+            dotenv_path = project_root / ".gemini" / ".env"
+            original = {
+                "default_agent": "project-custom-agent",
+                "experimental": {"enableAgents": False},
+                "provider": {"x": 1},
+            }
+            self.write_json(config_path, original)
+
+            self.run_command(
+                home,
+                "install",
+                "--target",
+                "gemini",
+                "--scope",
+                "project",
+                "--activate-default",
+                cwd=project_root,
+            )
+            installed = self.read_json(config_path)
+            self.assertEqual(installed["default_agent"], "project-custom-agent")
+            self.assertTrue(installed["experimental"]["enableAgents"])
+            self.assertTrue(installed["experimental"]["enableSubagents"])
+            self.assertEqual(installed["provider"], {"x": 1})
+            self.assertTrue(system_md_path.exists())
+            self.assertTrue(dotenv_path.exists())
+            self.assertIn("GEMINI_SYSTEM_MD=1", dotenv_path.read_text(encoding="utf-8"))
+
+            state_path = project_bootstrap_state_paths("gemini", "project", project_root, home=home).state_file
+            self.assertTrue(state_path.exists())
+
+            self.run_command(home, "uninstall", "--target", "gemini", "--scope", "project", cwd=project_root)
+            self.assertEqual(self.read_json(config_path), original)
+            self.assertFalse(state_path.exists())
+            self.assertFalse((project_root / ".gemini" / "agents" / "480-architect.md").exists())
+            self.assertFalse(system_md_path.exists())
+            self.assertFalse(dotenv_path.exists())
+
+    def test_gemini_system_prompt_override_restore_uses_install_state_managed_contents(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp).resolve()
+            config_dir = home / ".gemini"
+            config_dir.mkdir(parents=True, exist_ok=True)
+            state_dir = config_dir / ".480ai-bootstrap"
+            paths = InstallPaths(
+                config_dir=config_dir,
+                config_file=config_dir / "settings.json",
+                installed_agents_dir=config_dir / "agents",
+                state=bootstrap_state_paths(state_dir),
+            )
+            target = InstallTarget(name="gemini", label="Gemini", scope="user", paths=paths)
+
+            original_system_md = "ORIGINAL SYSTEM\n"
+            original_dotenv = "FOO=1\n\nBAR=2\n"
+            (config_dir / "system.md").write_text(original_system_md, encoding="utf-8")
+            (config_dir / ".env").write_text(original_dotenv, encoding="utf-8")
+
+            source_v1 = home / "source-v1"
+            source_v2 = home / "source-v2"
+            source_v1.mkdir(parents=True, exist_ok=True)
+            source_v2.mkdir(parents=True, exist_ok=True)
+            (source_v1 / "480-architect.md").write_text("v1 architect\n", encoding="utf-8")
+            (source_v2 / "480-architect.md").write_text("v2 architect\n", encoding="utf-8")
+
+            state: dict[str, object] = {}
+            installer_core.ensure_gemini_system_prompt_override(target, state, source_v1, enabled=True)
+            self.assertTrue((state_dir / "system.md.orig").exists())
+
+            installer_core.restore_gemini_system_prompt_override(target, state, source_v2)
+            self.assertEqual((config_dir / "system.md").read_text(encoding="utf-8"), original_system_md)
+            self.assertEqual((config_dir / ".env").read_text(encoding="utf-8"), original_dotenv)
+            self.assertFalse((state_dir / "system.md.orig").exists())
+
+    def test_gemini_system_prompt_override_does_not_delete_preexisting_managed_equivalent_system_md(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp).resolve()
+            config_dir = home / ".gemini"
+            config_dir.mkdir(parents=True, exist_ok=True)
+            state_dir = config_dir / ".480ai-bootstrap"
+            paths = InstallPaths(
+                config_dir=config_dir,
+                config_file=config_dir / "settings.json",
+                installed_agents_dir=config_dir / "agents",
+                state=bootstrap_state_paths(state_dir),
+            )
+            target = InstallTarget(name="gemini", label="Gemini", scope="user", paths=paths)
+
+            source_v1 = home / "source-v1"
+            source_v1.mkdir(parents=True, exist_ok=True)
+            architect_contents = "v1 architect\n"
+            (source_v1 / "480-architect.md").write_text(architect_contents, encoding="utf-8")
+            managed_system_md = installer_core.gemini_system_prompt_from_architect_agent(architect_contents)
+
+            system_path = config_dir / "system.md"
+            system_path.write_text(managed_system_md, encoding="utf-8")
+
+            state: dict[str, object] = {}
+            installer_core.ensure_gemini_system_prompt_override(target, state, source_v1, enabled=True)
+
+            override_state = state.get("gemini_system_prompt_override")
+            self.assertIsInstance(override_state, dict)
+            system_md_state = override_state.get("system_md") if isinstance(override_state, dict) else None
+            self.assertIsInstance(system_md_state, dict)
+            self.assertIs(system_md_state.get("existed_before_install"), True)
+            self.assertFalse((state_dir / "system.md.orig").exists())
+
+            installer_core.restore_gemini_system_prompt_override(target, state, source_v1)
+            self.assertTrue(system_path.exists())
+            self.assertEqual(system_path.read_text(encoding="utf-8"), managed_system_md)
+            self.assertFalse((config_dir / ".env").exists())
+
+    def test_ensure_gemini_system_prompt_override_normalizes_legacy_system_md_state(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp).resolve()
+            config_dir = home / ".gemini"
+            config_dir.mkdir(parents=True, exist_ok=True)
+            state_dir = config_dir / ".480ai-bootstrap"
+            paths = InstallPaths(
+                config_dir=config_dir,
+                config_file=config_dir / "settings.json",
+                installed_agents_dir=config_dir / "agents",
+                state=bootstrap_state_paths(state_dir),
+            )
+            target = InstallTarget(name="gemini", label="Gemini", scope="user", paths=paths)
+
+            (config_dir / "system.md").write_text("EXISTING SYSTEM\n", encoding="utf-8")
+            source_v1 = home / "source-v1"
+            source_v1.mkdir(parents=True, exist_ok=True)
+            (source_v1 / "480-architect.md").write_text("v1 architect\n", encoding="utf-8")
+
+            state: dict[str, object] = {
+                "gemini_system_prompt_override": {
+                    "enabled": True,
+                    "system_md": "legacy-string-state",
+                }
+            }
+            installer_core.ensure_gemini_system_prompt_override(target, state, source_v1, enabled=True)
+
+            override_state = state.get("gemini_system_prompt_override")
+            self.assertIsInstance(override_state, dict)
+            system_md_state = override_state.get("system_md") if isinstance(override_state, dict) else None
+            self.assertIsInstance(system_md_state, dict)
+            self.assertIn("managed_contents", system_md_state)
+            self.assertIn("managed_sha256", system_md_state)
+            self.assertTrue((state_dir / "system.md.orig").exists())
+            self.assertIn("backup", system_md_state)
+
+    def test_restore_gemini_system_prompt_override_keeps_backup_when_system_modified(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp).resolve()
+            config_dir = home / ".gemini"
+            config_dir.mkdir(parents=True, exist_ok=True)
+            state_dir = config_dir / ".480ai-bootstrap"
+            paths = InstallPaths(
+                config_dir=config_dir,
+                config_file=config_dir / "settings.json",
+                installed_agents_dir=config_dir / "agents",
+                state=bootstrap_state_paths(state_dir),
+            )
+            target = InstallTarget(name="gemini", label="Gemini", scope="user", paths=paths)
+
+            original_system_md = "ORIGINAL SYSTEM\n"
+            original_dotenv = "FOO=1\n\nBAR=2\n"
+            (config_dir / "system.md").write_text(original_system_md, encoding="utf-8")
+            (config_dir / ".env").write_text(original_dotenv, encoding="utf-8")
+
+            source_v1 = home / "source-v1"
+            source_v2 = home / "source-v2"
+            source_v1.mkdir(parents=True, exist_ok=True)
+            source_v2.mkdir(parents=True, exist_ok=True)
+            (source_v1 / "480-architect.md").write_text("v1 architect\n", encoding="utf-8")
+            (source_v2 / "480-architect.md").write_text("v2 architect\n", encoding="utf-8")
+
+            state: dict[str, object] = {}
+            installer_core.ensure_gemini_system_prompt_override(target, state, source_v1, enabled=True)
+            self.assertTrue((state_dir / "system.md.orig").exists())
+
+            user_modified = "USER MODIFIED\n"
+            (config_dir / "system.md").write_text(user_modified, encoding="utf-8")
+
+            installer_core.restore_gemini_system_prompt_override(target, state, source_v2)
+            self.assertEqual((config_dir / "system.md").read_text(encoding="utf-8"), user_modified)
+            self.assertEqual((config_dir / ".env").read_text(encoding="utf-8"), original_dotenv)
+            self.assertTrue((state_dir / "system.md.orig").exists())
+
+    def test_restore_gemini_system_prompt_override_malformed_dotenv_state_does_not_delete_preexisting_env(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp).resolve()
+            config_dir = home / ".gemini"
+            config_dir.mkdir(parents=True, exist_ok=True)
+            state_dir = config_dir / ".480ai-bootstrap"
+            paths = InstallPaths(
+                config_dir=config_dir,
+                config_file=config_dir / "settings.json",
+                installed_agents_dir=config_dir / "agents",
+                state=bootstrap_state_paths(state_dir),
+            )
+            target = InstallTarget(name="gemini", label="Gemini", scope="user", paths=paths)
+
+            env_path = config_dir / ".env"
+            env_path.write_text("", encoding="utf-8")
+
+            source_agents_dir = home / "source"
+            source_agents_dir.mkdir(parents=True, exist_ok=True)
+            (source_agents_dir / "480-architect.md").write_text("architect\n", encoding="utf-8")
+
+            state: dict[str, object] = {}
+            installer_core.ensure_gemini_system_prompt_override(target, state, source_agents_dir, enabled=True)
+            self.assertTrue(env_path.exists())
+            self.assertIn("GEMINI_SYSTEM_MD=1", env_path.read_text(encoding="utf-8"))
+
+            override_state = state.get("gemini_system_prompt_override")
+            self.assertIsInstance(override_state, dict)
+            if isinstance(override_state, dict):
+                override_state["dotenv"] = "malformed-state"
+
+            installer_core.restore_gemini_system_prompt_override(target, state, source_agents_dir)
+            self.assertTrue(env_path.exists())
+            self.assertEqual(env_path.read_text(encoding="utf-8"), "")
+
+    def test_restore_gemini_system_prompt_override_ignores_tampered_backup_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp).resolve()
+            config_dir = home / ".gemini"
+            config_dir.mkdir(parents=True, exist_ok=True)
+            state_dir = config_dir / ".480ai-bootstrap"
+            state_dir.mkdir(parents=True, exist_ok=True)
+            paths = InstallPaths(
+                config_dir=config_dir,
+                config_file=config_dir / "settings.json",
+                installed_agents_dir=config_dir / "agents",
+                state=bootstrap_state_paths(state_dir),
+            )
+            target = InstallTarget(name="gemini", label="Gemini", scope="user", paths=paths)
+
+            managed_contents = "MANAGED SYSTEM\n"
+            original_system_md = "ORIGINAL SYSTEM\n"
+            (config_dir / "system.md").write_text(managed_contents, encoding="utf-8")
+            (config_dir / ".env").write_text("FOO=1\n", encoding="utf-8")
+            (state_dir / "system.md.orig").write_text(original_system_md, encoding="utf-8")
+
+            outside_backup = home / "outside-backup.md"
+            outside_backup.write_text("EVIL CONTENT\n", encoding="utf-8")
+
+            state: dict[str, object] = {
+                "gemini_system_prompt_override": {
+                    "enabled": True,
+                    "system_md": {
+                        "existed_before_install": True,
+                        "managed_contents": managed_contents,
+                        "backup": str(Path("..") / ".." / outside_backup.name),
+                    },
+                    "dotenv": {"existed_before_install": True},
+                }
+            }
+
+            source_agents_dir = home / "source"
+            source_agents_dir.mkdir(parents=True, exist_ok=True)
+            (source_agents_dir / "480-architect.md").write_text("architect\n", encoding="utf-8")
+
+            installer_core.restore_gemini_system_prompt_override(target, state, source_agents_dir)
+            self.assertEqual((config_dir / "system.md").read_text(encoding="utf-8"), original_system_md)
+            self.assertFalse((state_dir / "system.md.orig").exists())
+            self.assertNotIn("gemini_system_prompt_override", state)
+
+    def test_restore_gemini_system_prompt_override_removes_stale_backup_when_no_original_system(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp).resolve()
+            config_dir = home / ".gemini"
+            config_dir.mkdir(parents=True, exist_ok=True)
+            state_dir = config_dir / ".480ai-bootstrap"
+            state_dir.mkdir(parents=True, exist_ok=True)
+            paths = InstallPaths(
+                config_dir=config_dir,
+                config_file=config_dir / "settings.json",
+                installed_agents_dir=config_dir / "agents",
+                state=bootstrap_state_paths(state_dir),
+            )
+            target = InstallTarget(name="gemini", label="Gemini", scope="user", paths=paths)
+
+            source_agents_dir = home / "source"
+            source_agents_dir.mkdir(parents=True, exist_ok=True)
+            (source_agents_dir / "480-architect.md").write_text("architect\n", encoding="utf-8")
+            managed_contents = installer_core.gemini_system_prompt_from_architect_agent("architect\n")
+
+            (config_dir / "system.md").write_text("USER MODIFIED\n", encoding="utf-8")
+            (state_dir / "system.md.orig").write_text("STALE BACKUP\n", encoding="utf-8")
+
+            state: dict[str, object] = {
+                "gemini_system_prompt_override": {
+                    "enabled": True,
+                    "system_md": {
+                        "existed_before_install": False,
+                        "managed_contents": managed_contents,
+                    },
+                    "dotenv": {"existed_before_install": False},
+                }
+            }
+
+            installer_core.restore_gemini_system_prompt_override(target, state, source_agents_dir)
+            self.assertFalse((state_dir / "system.md.orig").exists())
+
+    def test_gemini_reinstall_uninstall_does_not_leave_stale_system_prompt_backup(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            project_root, _nested_dir = self.make_repo_project(home)
+            state_paths = project_bootstrap_state_paths("gemini", "project", project_root, home=home)
+            backup_path = state_paths.state_dir / "system.md.orig"
+
+            self.run_command(
+                home,
+                "install",
+                "--target",
+                "gemini",
+                "--scope",
+                "project",
+                "--activate-default",
+                cwd=project_root,
+            )
+            self.assertTrue(state_paths.state_file.exists())
+            self.assertFalse(backup_path.exists())
+
+            self.run_command(
+                home,
+                "install",
+                "--target",
+                "gemini",
+                "--scope",
+                "project",
+                "--activate-default",
+                cwd=project_root,
+            )
+            self.assertTrue(state_paths.state_file.exists())
+            self.assertFalse(backup_path.exists())
+
+            self.run_command(home, "uninstall", "--target", "gemini", "--scope", "project", cwd=project_root)
+            self.assertFalse(backup_path.exists())
+            self.assertFalse(state_paths.state_dir.exists())
+
+    def test_gemini_system_prompt_adds_subagents_placeholder_and_delegation_section_when_missing(self) -> None:
+        input_contents = (
+            "# Architect Agent\n"
+            "This is the architect agent prompt.\n"
+            "It does not contain subagent delegation or the subagents placeholder.\n"
+        )
+
+        result = installer_core.gemini_system_prompt_from_architect_agent(input_contents)
+
+        self.assertTrue(result.startswith("${SubAgents}\n\n"))
+        self.assertIn("## Subagent delegation (Gemini CLI)", result)
+        self.assertIn("Gemini CLI subagents are exposed as tools.", result)
+        self.assertIn("# Architect Agent", result)
+        self.assertIn("This is the architect agent prompt.", result)
+
+    def test_gemini_system_prompt_strips_yaml_frontmatter(self) -> None:
+        input_contents = (
+            "---\n"
+            "key: value\n"
+            "description: this should be stripped\n"
+            "---\n"
+            "# Architect Agent\n"
+            "This is the architect agent prompt with frontmatter.\n"
+        )
+
+        result = installer_core.gemini_system_prompt_from_architect_agent(input_contents)
+
+        self.assertNotIn("---", result)
+        self.assertNotIn("key: value", result)
+        self.assertNotIn("description: this should be stripped", result)
+        self.assertIn("${SubAgents}", result)
+        self.assertIn("## Subagent delegation (Gemini CLI)", result)
+        self.assertIn("# Architect Agent", result)
+        self.assertIn("This is the architect agent prompt with frontmatter.", result)
+
+    def test_gemini_system_prompt_does_not_duplicate_subagents_or_delegation_section(self) -> None:
+        input_contents = (
+            "${SubAgents}\n\n"
+            "## Subagent delegation (Gemini CLI)\n\n"
+            "Existing content.\n"
+        )
+
+        result = installer_core.gemini_system_prompt_from_architect_agent(input_contents)
+
+        self.assertEqual(result.count("${SubAgents}"), 1)
+        self.assertEqual(result.count("## Subagent delegation (Gemini CLI)"), 1)
+        self.assertIn("Existing content.", result)
+
+    def test_gemini_system_prompt_strips_agent_name_header(self) -> None:
+        input_contents = "Gemini CLI agent name: 480-architect\n\nActual content.\n"
+
+        result = installer_core.gemini_system_prompt_from_architect_agent(input_contents)
+
+        self.assertNotIn("Gemini CLI agent name:", result)
+        self.assertIn("Actual content.", result)
+
+    def test_gemini_agent_frontmatter_names_are_valid_for_tool_registration(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            project_root, _nested_dir = self.make_repo_project(home)
+
+            self.run_command(
+                home,
+                "install",
+                "--target",
+                "gemini",
+                "--scope",
+                "project",
+                "--activate-default",
+                cwd=project_root,
+            )
+
+            agents_dir = project_root / ".gemini" / "agents"
+            expected = {
+                "480-architect.md": "name: _480-architect",
+                "480-developer.md": "name: _480-developer",
+                "480-code-reviewer.md": "name: _480-code-reviewer",
+                "480-code-reviewer2.md": "name: _480-code-reviewer2",
+                "480-code-scanner.md": "name: _480-code-scanner",
+            }
+            for filename, expected_line in expected.items():
+                text = (agents_dir / filename).read_text(encoding="utf-8")
+                self.assertIn(expected_line, text)
+
+    def test_gemini_uninstall_with_legacy_state_missing_managed_config_does_not_crash(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            config_path = home / ".gemini" / "settings.json"
+            state_path = home / ".gemini" / ".480ai-bootstrap" / "state.json"
+            hook_path = home / ".gemini" / ".480ai" / "desktop-notify-hook.py"
+            original = {
+                "default_agent": "legacy-custom",
+                "hooks": {"SessionEnd": [{"type": "command", "command": "echo existing-session-end"}]},
+            }
+            self.write_json(config_path, original)
+
+            with self.patched_manage_agents_home(home):
+                manage_agents.install(
+                    target="gemini",
+                    scope="user",
+                    activate_default=True,
+                    desktop_notifications=True,
+                )
+
+                state = self.read_json(state_path)
+                state.pop("managed_config", None)
+                self.write_json(state_path, state)
+
+                manage_agents.uninstall(target="gemini", scope="user")
+
+            restored = self.read_json(config_path)
+            self.assertEqual(restored.get("default_agent"), original["default_agent"])
+            self.assertIn("experimental", restored)
+            self.assertEqual(restored["experimental"], {"enableAgents": True, "enableSubagents": True})
+            self.assertIn("hooks", restored)
+            self.assertIn("SessionEnd", restored["hooks"])
+            session_end_hooks = restored["hooks"]["SessionEnd"]
+            self.assertIsInstance(session_end_hooks, list)
+            self.assertIn({"type": "command", "command": "echo existing-session-end"}, session_end_hooks)
+            managed_commands = [
+                hook["command"]
+                for hook in session_end_hooks
+                if isinstance(hook, dict) and hook.get("type") == "command"
+            ]
+            self.assertNotIn(f"{hook_path} gemini", managed_commands)
+            self.assertFalse(state_path.exists())
+            self.assertFalse(hook_path.exists())
+
+    def test_qwen_uninstall_with_legacy_state_missing_managed_config_does_not_crash(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            config_path = home / ".qwen" / "settings.json"
+            state_path = home / ".qwen" / ".480ai-bootstrap" / "state.json"
+            hook_path = home / ".qwen" / ".480ai" / "desktop-notify-hook.py"
+            original = {
+                "selectedAuthType": "openai",
+                "hooks": {"Stop": [{"type": "command", "command": "echo existing-stop"}]},
+            }
+            self.write_json(config_path, original)
+
+            with self.patched_manage_agents_home(home):
+                manage_agents.install(
+                    target="qwen",
+                    scope="user",
+                    activate_default=False,
+                    desktop_notifications=True,
+                )
+
+                state = self.read_json(state_path)
+                state.pop("managed_config", None)
+                self.write_json(state_path, state)
+
+                manage_agents.uninstall(target="qwen", scope="user")
+
+            restored = self.read_json(config_path)
+            self.assertEqual(restored, original)
+            self.assertFalse(state_path.exists())
+            self.assertFalse(hook_path.exists())
+
+    def test_qwen_reinstall_with_non_object_managed_config_succeeds(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            config_path = home / ".qwen" / "settings.json"
+            state_path = home / ".qwen" / ".480ai-bootstrap" / "state.json"
+            hook_path = home / ".qwen" / ".480ai" / "desktop-notify-hook.py"
+
+            self.write_json(config_path, {"selectedAuthType": "openai"})
+
+            with self.patched_manage_agents_home(home):
+                manage_agents.install(
+                    target="qwen",
+                    scope="user",
+                    activate_default=False,
+                    desktop_notifications=True,
+                )
+                state = self.read_json(state_path)
+                state["managed_config"] = "not-a-dict"
+                self.write_json(state_path, state)
+
+                manage_agents.install(
+                    target="qwen",
+                    scope="user",
+                    activate_default=False,
+                    desktop_notifications=True,
+                )
+
+            updated_state = self.read_json(state_path)
+            self.assertIsInstance(updated_state.get("managed_config"), dict)
+            installed = self.read_json(config_path)
+            stop_hooks = installed.get("hooks", {}).get("Stop")
+            self.assertIsInstance(stop_hooks, list)
+            managed_commands = [
+                hook["command"]
+                for hook in stop_hooks
+                if isinstance(hook, dict) and hook.get("type") == "command"
+            ]
+            self.assertIn(f"{hook_path} qwen", managed_commands)
+
+    def test_gemini_uninstall_recovers_from_invalid_state_json_with_best_effort_cleanup(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            state_path = home / ".gemini" / ".480ai-bootstrap" / "state.json"
+            installed_agent = home / ".gemini" / "agents" / "480-developer.md"
+
+            self.run_command(home, "install", "--target", "gemini", "--scope", "user", "--no-activate-default")
+            self.assertTrue(state_path.exists())
+            self.assertTrue(installed_agent.exists())
+
+            state_path.write_text("{", encoding="utf-8")
+
+            result = self.run_command_capture(home, "uninstall", "--target", "gemini", "--scope", "user")
+            self.assertEqual(result.returncode, 0)
+            self.assertFalse(state_path.exists())
+            self.assertFalse(installed_agent.exists())
+
+            result = self.run_command_capture(home, "uninstall", "--target", "gemini", "--scope", "user")
+            self.assertEqual(result.returncode, 0)
+
+    def test_qwen_uninstall_recovers_from_invalid_state_json_with_best_effort_cleanup(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            state_path = home / ".qwen" / ".480ai-bootstrap" / "state.json"
+            installed_agent = home / ".qwen" / "agents" / "480-developer.md"
+
+            self.run_command(home, "install", "--target", "qwen", "--scope", "user", "--no-activate-default")
+            self.assertTrue(state_path.exists())
+            self.assertTrue(installed_agent.exists())
+
+            state_path.write_text("{", encoding="utf-8")
+
+            result = self.run_command_capture(home, "uninstall", "--target", "qwen", "--scope", "user")
+            self.assertEqual(result.returncode, 0)
+            self.assertFalse(state_path.exists())
+            self.assertFalse(installed_agent.exists())
+
+            result = self.run_command_capture(home, "uninstall", "--target", "qwen", "--scope", "user")
+            self.assertEqual(result.returncode, 0)
+
+    def test_gemini_uninstall_recovers_from_sparse_state_json_with_best_effort_cleanup(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            state_path = home / ".gemini" / ".480ai-bootstrap" / "state.json"
+            installed_agent = home / ".gemini" / "agents" / "480-developer.md"
+
+            self.run_command(home, "install", "--target", "gemini", "--scope", "user", "--no-activate-default")
+            self.assertTrue(state_path.exists())
+            self.assertTrue(installed_agent.exists())
+
+            self.write_json(state_path, {})
+
+            result = self.run_command_capture(home, "uninstall", "--target", "gemini", "--scope", "user")
+            self.assertEqual(result.returncode, 0)
+            self.assertIn("best-effort uninstall", result.stdout)
+            self.assertIn("Missing managed_agents", result.stdout)
+            self.assertFalse(state_path.exists())
+            self.assertFalse(installed_agent.exists())
+
+    def test_qwen_uninstall_recovers_from_sparse_state_json_with_best_effort_cleanup(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            state_path = home / ".qwen" / ".480ai-bootstrap" / "state.json"
+            installed_agent = home / ".qwen" / "agents" / "480-developer.md"
+
+            self.run_command(home, "install", "--target", "qwen", "--scope", "user", "--no-activate-default")
+            self.assertTrue(state_path.exists())
+            self.assertTrue(installed_agent.exists())
+
+            self.write_json(state_path, {})
+
+            result = self.run_command_capture(home, "uninstall", "--target", "qwen", "--scope", "user")
+            self.assertEqual(result.returncode, 0)
+            self.assertIn("best-effort uninstall", result.stdout)
+            self.assertIn("Missing managed_agents", result.stdout)
+            self.assertFalse(state_path.exists())
+            self.assertFalse(installed_agent.exists())
+
+    def test_qwen_user_install_with_desktop_notifications_restores_stop_hook(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            config_path = home / ".qwen" / "settings.json"
+            hook_path = home / ".qwen" / ".480ai" / "desktop-notify-hook.py"
+            original = {
+                "selectedAuthType": "openai",
+                "hooks": {"Stop": [{"type": "command", "command": "echo existing-stop"}]},
+            }
+            self.write_json(config_path, original)
+
+            with self.patched_manage_agents_home(home):
+                manage_agents.install(
+                    target="qwen",
+                    scope="user",
+                    activate_default=False,
+                    desktop_notifications=True,
+                )
+
+                installed = self.read_json(config_path)
+                self.assertIn("hooks", installed)
+                self.assertIn("Stop", installed["hooks"])
+                stop_hooks = installed["hooks"]["Stop"]
+                self.assertIsInstance(stop_hooks, list)
+                stop_commands = [
+                    hook["command"]
+                    for hook in stop_hooks
+                    if isinstance(hook, dict) and hook.get("type") == "command"
+                ]
+                self.assertIn(f"{hook_path} qwen", stop_commands)
+                self.assertTrue(hook_path.exists())
+
+                manage_agents.uninstall(target="qwen", scope="user")
+
+            restored = self.read_json(config_path)
+            self.assertEqual(restored, original)
+            self.assertFalse(hook_path.exists())
+
+    def test_gemini_install_fails_with_actionable_error_when_experimental_is_not_object(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            config_path = home / ".gemini" / "settings.json"
+            self.write_json(config_path, {"experimental": []})
+
+            result = self.run_command_capture(home, "install", "--target", "gemini", "--scope", "user")
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Expected JSON object", result.stderr)
+            self.assertIn(
+                "Enable Gemini agents by setting experimental.enableAgents=true and experimental.enableSubagents=true.",
+                result.stderr,
+            )
+
+    def test_qwen_install_migrates_legacy_selected_auth_type_to_selected_auth_type(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            config_path = home / ".qwen" / "settings.json"
+            self.write_json(
+                config_path,
+                {
+                    "security": {"auth": {"selectedType": "qwen-oauth"}},
+                    "theme": "Qwen Dark",
+                },
+            )
+
+            self.run_command(home, "install", "--target", "qwen", "--scope", "user", "--no-activate-default")
+
+            installed = self.read_json(config_path)
+            self.assertEqual(installed["selectedAuthType"], "oauth-personal")
+            self.assertEqual(installed["security"]["auth"]["selectedType"], "qwen-oauth")
+            self.assertEqual(installed["theme"], "Qwen Dark")
+
+    def test_qwen_install_preserves_existing_selected_auth_type(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            config_path = home / ".qwen" / "settings.json"
+            self.write_json(
+                config_path,
+                {
+                    "selectedAuthType": "openai",
+                    "security": {"auth": {"selectedType": "qwen-oauth"}},
+                },
+            )
+
+            self.run_command(home, "install", "--target", "qwen", "--scope", "user", "--no-activate-default")
+
+            installed = self.read_json(config_path)
+            self.assertEqual(installed["selectedAuthType"], "openai")
 
     def test_codex_user_install_updates_existing_dotted_subagent_settings_in_place(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -5123,7 +6071,7 @@ manage_agents.install(target="codex", scope="user")
             self.assertNotEqual(pending_result.returncode, 0)
             self.assertIn("Invalid pending_cleanup", pending_result.stderr)
 
-    def test_uninstall_rejects_sparse_state_without_touching_live_files(self) -> None:
+    def test_uninstall_recovers_from_sparse_state_json_with_best_effort_cleanup(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp)
             config_path = home / ".config" / "opencode" / "opencode.json"
@@ -5138,9 +6086,11 @@ manage_agents.install(target="codex", scope="user")
 
             result = self.run_command_capture(home, "uninstall")
 
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn("Missing managed_agents", result.stderr)
-            self.assertEqual(architect_path.read_text(encoding="utf-8"), managed_contents)
+            self.assertEqual(result.returncode, 0)
+            self.assertIn("best-effort uninstall", result.stdout)
+            self.assertIn("Missing managed_agents", result.stdout)
+            self.assertFalse(state_path.exists())
+            self.assertFalse(architect_path.exists())
             self.assertEqual(
                 self.read_json(config_path),
                 {"default_agent": "480-architect", "provider": {"x": 1}},
@@ -5563,6 +6513,66 @@ manage_agents.install(target="codex", scope="user")
             (provider_agents_source_dir("claude") / "480-code-scanner.md").read_text(encoding="utf-8")
         )
         self.assertIn("- `480-code-scanner`\n  - file: `providers/opencode/agents/480-code-scanner.md`\n  - model: `openai/gpt-5.4-nano`\n  - reasoning: `high`", agents_index)
+
+    def test_qwen_agent_frontmatter_keeps_required_tools_declarations(self) -> None:
+        expected_tools_by_agent = {
+            "480-architect": [
+                "run_shell_command",
+                "read_file",
+                "write_file",
+                "edit_file",
+                "grep",
+                "glob",
+                "web_fetch",
+            ],
+            "480-developer": [
+                "run_shell_command",
+                "read_file",
+                "write_file",
+                "edit_file",
+                "grep",
+                "glob",
+                "web_fetch",
+            ],
+            "480-code-reviewer": [
+                "read_file",
+                "glob",
+                "grep",
+                "run_shell_command",
+            ],
+            "480-code-reviewer2": [
+                "read_file",
+                "glob",
+                "grep",
+                "run_shell_command",
+            ],
+            "480-code-scanner": [
+                "read_file",
+                "glob",
+                "grep",
+                "run_shell_command",
+            ],
+        }
+
+        for agent_name, expected_tools in expected_tools_by_agent.items():
+            contents = (provider_agents_source_dir("qwen") / f"{agent_name}.md").read_text(encoding="utf-8")
+            frontmatter_match = re.match(r"^---\n(.*?)\n---\n", contents, flags=re.DOTALL)
+            self.assertIsNotNone(frontmatter_match, f"Missing frontmatter: {agent_name}")
+            frontmatter = frontmatter_match.group(1)
+
+            parsed_tools: list[str] = []
+            in_tools_block = False
+            for line in frontmatter.splitlines():
+                if line.strip() == "tools:":
+                    in_tools_block = True
+                    continue
+                if in_tools_block:
+                    if line.startswith("  - "):
+                        parsed_tools.append(line.removeprefix("  - ").strip())
+                        continue
+                    break
+
+            self.assertEqual(parsed_tools, expected_tools, f"Unexpected tools frontmatter for {agent_name}")
 
     def test_codex_agents_index_lists_synced_default_models(self) -> None:
         agents_index = (REPO_ROOT / "providers" / "codex" / "AGENTS.md").read_text(encoding="utf-8")

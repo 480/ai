@@ -37,6 +37,20 @@ def _codex_name_map(specs: tuple[AgentSpec, ...]) -> dict[str, str]:
     return _provider_name_map("codex", specs)
 
 
+def _gemini_tool_name_map(specs: tuple[AgentSpec, ...]) -> dict[str, str]:
+    provider = get_provider("gemini")
+    name_map: dict[str, str] = {}
+    for spec in specs:
+        metadata = spec.metadata_for_target("gemini")
+        tool_name = metadata.get("tool_name")
+        if tool_name is None:
+            tool_name = provider.bundle_agent_name(spec)
+        if not isinstance(tool_name, str) or not tool_name:
+            raise ValueError(f"Invalid Gemini CLI tool_name for {spec.identifier}.")
+        name_map[spec.identifier] = tool_name
+    return name_map
+
+
 def _codex_custom_specs(specs: tuple[AgentSpec, ...]) -> list[AgentSpec]:
     return [spec for spec in specs if spec.mode == "subagent"]
 
@@ -196,9 +210,9 @@ def render_gemini_agent(
 ) -> str:
     provider = get_provider("gemini")
     metadata = spec.metadata_for_target("gemini")
-    name = metadata.get("name")
-    if not isinstance(name, str) or not name:
-        raise ValueError(f"Invalid Gemini CLI agent name for {spec.identifier}.")
+    tool_name = gemini_name_map.get(spec.identifier)
+    if not isinstance(tool_name, str) or not tool_name:
+        raise ValueError(f"Invalid Gemini CLI agent tool name for {spec.identifier}.")
 
     tools = metadata.get("tools")
     if tools is not None:
@@ -211,10 +225,10 @@ def render_gemini_agent(
     if not body.endswith("\n"):
         body += "\n"
 
-    mapping_line = f"Gemini CLI agent name: {name} maps to role `{spec.identifier}`."
+    mapping_line = f"Gemini CLI agent name: {tool_name} maps to role `{spec.identifier}`."
     front_matter = [
         "---",
-        f"name: {name}",
+        f"name: {tool_name}",
         f"description: {spec.description}",
     ]
     if model_profile.model != "inherit":
@@ -644,7 +658,8 @@ def render_gemini_agents_index(
     specs: tuple[AgentSpec, ...],
     model_selection: ProviderModelSelection | None = None,
 ) -> str:
-    gemini_name_map = _provider_name_map("gemini", specs)
+    gemini_file_name_map = _provider_name_map("gemini", specs)
+    gemini_tool_name_map = _gemini_tool_name_map(specs)
     primary = [spec for spec in specs if spec.mode == "primary"]
     subagents = [spec for spec in specs if spec.mode == "subagent"]
 
@@ -658,17 +673,20 @@ def render_gemini_agents_index(
     ]
 
     for spec in specs:
-        gemini_name = gemini_name_map[spec.identifier]
-        lines.append(f"- `{spec.identifier}` -> `{gemini_name}` (`providers/gemini/agents/{gemini_name}.md`)")
+        file_name = gemini_file_name_map[spec.identifier]
+        tool_name = gemini_tool_name_map[spec.identifier]
+        lines.append(f"- `{spec.identifier}` -> `{tool_name}` (`providers/gemini/agents/{file_name}.md`)")
 
     lines.extend(["", "## Primary", ""])
     for spec in primary:
         model_profile = _model_profile_for_provider("gemini", spec, model_selection)
+        file_name = gemini_file_name_map[spec.identifier]
+        tool_name = gemini_tool_name_map[spec.identifier]
         lines.extend(
             [
-                f"- `{gemini_name_map[spec.identifier]}`",
+                f"- `{tool_name}`",
                 f"  - maps from: `{spec.identifier}`",
-                f"  - file: `providers/gemini/agents/{gemini_name_map[spec.identifier]}.md`",
+                f"  - file: `providers/gemini/agents/{file_name}.md`",
                 f"  - model: `{model_profile.model}`",
                 "",
             ]
@@ -677,11 +695,13 @@ def render_gemini_agents_index(
     lines.extend(["## Subagents", ""])
     for spec in subagents:
         model_profile = _model_profile_for_provider("gemini", spec, model_selection)
+        file_name = gemini_file_name_map[spec.identifier]
+        tool_name = gemini_tool_name_map[spec.identifier]
         lines.extend(
             [
-                f"- `{gemini_name_map[spec.identifier]}`",
+                f"- `{tool_name}`",
                 f"  - maps from: `{spec.identifier}`",
-                f"  - file: `providers/gemini/agents/{gemini_name_map[spec.identifier]}.md`",
+                f"  - file: `providers/gemini/agents/{file_name}.md`",
                 f"  - model: `{model_profile.model}`",
                 "",
             ]
@@ -697,12 +717,13 @@ def render_gemini_agents_index(
             "",
             "## Default behavior",
             "",
-            "- Default activation is optional and only sets `default_agent` to `480-architect` when `--activate-default` is used.",
-            "- Uninstall restores the previous value only when the current `default_agent` is still `480-architect`.",
+            "- Default activation is optional and enables the system prompt override (`GEMINI_SYSTEM_MD=1`) when `--activate-default` is used.",
+            "- The override reads `.gemini/system.md` (project) or `~/.gemini/system.md` (user) depending on scope.",
+            "- Uninstall restores `system.md` only when it still matches the managed contents.",
             "",
             "## Subagent support",
             "",
-            "- Gemini CLI subagents are experimental and require `{\"experimental\": {{\"enableSubagents\": true}}}` in `settings.json`.",
+            "- Gemini CLI subagents are enabled by default; this installer ensures `{\"experimental\": {\"enableAgents\": true, \"enableSubagents\": true}}` in `settings.json` for compatibility across Gemini CLI versions.",
             "- Agents are discovered from `.gemini/agents/` (project) and `~/.gemini/agents/` (user) directories.",
             "- The main Gemini CLI automatically routes tasks to subagents based on their `description` field.",
             "",
@@ -763,31 +784,34 @@ def _render_provider_index(
 def _expected_provider_outputs(
     target: str,
     specs: tuple[AgentSpec, ...],
-    name_map: dict[str, str],
+    output_name_map: dict[str, str],
     *,
     repo_root: Path | None = None,
     model_selection: ProviderModelSelection | None = None,
+    render_name_map: dict[str, str] | None = None,
 ) -> dict[Path, str]:
     provider = get_provider(target)
     agents_dir = provider_agents_dir(target, repo_root=repo_root)
     expected_outputs: dict[Path, str] = {}
+    if render_name_map is None:
+        render_name_map = output_name_map
     for spec in specs:
         if target == "codex" and spec.mode == "primary":
             continue
-        output_names = [name_map[spec.identifier]]
+        output_names = [output_name_map[spec.identifier]]
         if target == "codex":
-            output_names = _codex_agent_output_names(spec, name_map)
+            output_names = _codex_agent_output_names(spec, output_name_map)
         for output_name in output_names:
             contents = _render_provider_agent(
                 target,
                 spec,
-                name_map,
+                render_name_map,
                 model_selection=model_selection,
             )
             if target == "codex":
                 contents = render_codex_agent(
                     spec,
-                    name_map,
+                    render_name_map,
                     model_selection=model_selection,
                     rendered_name=output_name,
                 )
@@ -828,9 +852,17 @@ def _write_directory_outputs(expected_outputs: dict[Path, str], *, directory: Pa
 def write_outputs() -> None:
     specs = load_bundle()
     for provider in all_providers():
-        name_map = _provider_name_map(provider.identifier, specs)
+        output_name_map = _provider_name_map(provider.identifier, specs)
+        render_name_map = output_name_map
+        if provider.identifier == "gemini":
+            render_name_map = _gemini_tool_name_map(specs)
         _write_directory_outputs(
-            _expected_provider_outputs(provider.identifier, specs, name_map),
+            _expected_provider_outputs(
+                provider.identifier,
+                specs,
+                output_name_map,
+                render_name_map=render_name_map,
+            ),
             directory=provider_agents_dir(provider.identifier),
             suffix=provider.artifacts.agent_file_extension,
         )
@@ -844,10 +876,18 @@ def check_outputs() -> int:
     specs = load_bundle()
     mismatches: list[Path] = []
     for provider in all_providers():
-        name_map = _provider_name_map(provider.identifier, specs)
+        output_name_map = _provider_name_map(provider.identifier, specs)
+        render_name_map = output_name_map
+        if provider.identifier == "gemini":
+            render_name_map = _gemini_tool_name_map(specs)
         mismatches.extend(
             _check_directory_outputs(
-                _expected_provider_outputs(provider.identifier, specs, name_map),
+                _expected_provider_outputs(
+                    provider.identifier,
+                    specs,
+                    output_name_map,
+                    render_name_map=render_name_map,
+                ),
                 directory=provider_agents_dir(provider.identifier),
                 suffix=provider.artifacts.agent_file_extension,
             )
@@ -875,15 +915,19 @@ def write_provider_outputs(
 ) -> Path:
     specs = load_bundle()
     provider = get_provider(target)
-    name_map = _provider_name_map(target, specs)
+    output_name_map = _provider_name_map(target, specs)
+    render_name_map = output_name_map
+    if target == "gemini":
+        render_name_map = _gemini_tool_name_map(specs)
     agents_dir = provider_agents_dir(target, repo_root=repo_root)
     _write_directory_outputs(
         _expected_provider_outputs(
             target,
             specs,
-            name_map,
+            output_name_map,
             repo_root=repo_root,
             model_selection=model_selection,
+            render_name_map=render_name_map,
         ),
         directory=agents_dir,
         suffix=provider.artifacts.agent_file_extension,

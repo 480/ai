@@ -6,3 +6,5 @@ docs/480ai/
 .codex/
 .claude/
 .opencode/
+.gemini/
+.qwen/

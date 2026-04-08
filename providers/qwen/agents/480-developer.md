@@ -1,6 +1,14 @@
 ---
 name: 480-developer
 description: Writes careful and considered code.
+tools:
+  - run_shell_command
+  - read_file
+  - write_file
+  - edit_file
+  - grep
+  - glob
+  - web_fetch
 ---
 Qwen Code agent name: 480-developer maps to role `480-developer`.
 

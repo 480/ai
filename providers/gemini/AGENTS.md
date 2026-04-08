@@ -4,37 +4,37 @@ Documentation for the checked-in Gemini CLI artifacts and install behavior.
 
 ## Name mapping
 
-- `480-architect` -> `480-architect` (`providers/gemini/agents/480-architect.md`)
-- `480-developer` -> `480-developer` (`providers/gemini/agents/480-developer.md`)
-- `480-code-reviewer` -> `480-code-reviewer` (`providers/gemini/agents/480-code-reviewer.md`)
-- `480-code-reviewer2` -> `480-code-reviewer2` (`providers/gemini/agents/480-code-reviewer2.md`)
-- `480-code-scanner` -> `480-code-scanner` (`providers/gemini/agents/480-code-scanner.md`)
+- `480-architect` -> `_480-architect` (`providers/gemini/agents/480-architect.md`)
+- `480-developer` -> `_480-developer` (`providers/gemini/agents/480-developer.md`)
+- `480-code-reviewer` -> `_480-code-reviewer` (`providers/gemini/agents/480-code-reviewer.md`)
+- `480-code-reviewer2` -> `_480-code-reviewer2` (`providers/gemini/agents/480-code-reviewer2.md`)
+- `480-code-scanner` -> `_480-code-scanner` (`providers/gemini/agents/480-code-scanner.md`)
 
 ## Primary
 
-- `480-architect`
+- `_480-architect`
   - maps from: `480-architect`
   - file: `providers/gemini/agents/480-architect.md`
   - model: `inherit`
 
 ## Subagents
 
-- `480-developer`
+- `_480-developer`
   - maps from: `480-developer`
   - file: `providers/gemini/agents/480-developer.md`
   - model: `inherit`
 
-- `480-code-reviewer`
+- `_480-code-reviewer`
   - maps from: `480-code-reviewer`
   - file: `providers/gemini/agents/480-code-reviewer.md`
   - model: `inherit`
 
-- `480-code-reviewer2`
+- `_480-code-reviewer2`
   - maps from: `480-code-reviewer2`
   - file: `providers/gemini/agents/480-code-reviewer2.md`
   - model: `inherit`
 
-- `480-code-scanner`
+- `_480-code-scanner`
   - maps from: `480-code-scanner`
   - file: `providers/gemini/agents/480-code-scanner.md`
   - model: `inherit`
@@ -47,12 +47,13 @@ Advanced installs render temporary artifacts from the selected model combination
 
 ## Default behavior
 
-- Default activation is optional and only sets `default_agent` to `480-architect` when `--activate-default` is used.
-- Uninstall restores the previous value only when the current `default_agent` is still `480-architect`.
+- Default activation is optional and enables the system prompt override (`GEMINI_SYSTEM_MD=1`) when `--activate-default` is used.
+- The override reads `.gemini/system.md` (project) or `~/.gemini/system.md` (user) depending on scope.
+- Uninstall restores `system.md` only when it still matches the managed contents.
 
 ## Subagent support
 
-- Gemini CLI subagents are experimental and require `{"experimental": {{"enableSubagents": true}}}` in `settings.json`.
+- Gemini CLI subagents are enabled by default; this installer ensures `{"experimental": {"enableAgents": true, "enableSubagents": true}}` in `settings.json` for compatibility across Gemini CLI versions.
 - Agents are discovered from `.gemini/agents/` (project) and `~/.gemini/agents/` (user) directories.
 - The main Gemini CLI automatically routes tasks to subagents based on their `description` field.
 

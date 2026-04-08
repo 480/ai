@@ -793,10 +793,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         user_config_dir_parts=(".gemini",),
         project_config_dirname=".gemini",
         config_filename="settings.json",
-        default_activation=DefaultActivation(
-            config_key="default_agent",
-            managed_value="480-architect",
-        ),
+        default_activation=None,
         default_activation_default=False,
         artifacts=ProviderArtifacts(
             agents_dirname="providers/gemini/agents",

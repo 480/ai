@@ -58,7 +58,8 @@
           ]
         },
         "gemini": {
-          "name": "480-architect"
+          "name": "480-architect",
+          "tool_name": "_480-architect"
         }
       }
     },
@@ -110,7 +111,8 @@
           ]
         },
         "gemini": {
-          "name": "480-developer"
+          "name": "480-developer",
+          "tool_name": "_480-developer"
         }
       }
     },
@@ -156,7 +158,8 @@
           ]
         },
         "gemini": {
-          "name": "480-code-reviewer"
+          "name": "480-code-reviewer",
+          "tool_name": "_480-code-reviewer"
         }
       }
     },
@@ -202,7 +205,8 @@
           ]
         },
         "gemini": {
-          "name": "480-code-reviewer2"
+          "name": "480-code-reviewer2",
+          "tool_name": "_480-code-reviewer2"
         }
       }
     },
@@ -248,7 +252,8 @@
           ]
         },
         "gemini": {
-          "name": "480-code-scanner"
+          "name": "480-code-scanner",
+          "tool_name": "_480-code-scanner"
         }
       }
     }

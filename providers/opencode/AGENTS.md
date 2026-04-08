@@ -6,7 +6,7 @@ Documentation for the checked-in OpenCode artifacts and install behavior.
 
 - `480-architect`
   - file: `providers/opencode/agents/480-architect.md`
-  - model: `inherit`
+  - model: `openai/gpt-5.4`
   - reasoning: `xhigh`
   - role: planning, scoping, and orchestrating the implementation/review loop
 
@@ -14,25 +14,25 @@ Documentation for the checked-in OpenCode artifacts and install behavior.
 
 - `480-developer`
   - file: `providers/opencode/agents/480-developer.md`
-  - model: `inherit`
+  - model: `openai/gpt-5.4`
   - reasoning: `medium`
   - role: implementation
 
 - `480-code-reviewer`
   - file: `providers/opencode/agents/480-code-reviewer.md`
-  - model: `inherit`
+  - model: `openai/gpt-5.4`
   - reasoning: `high`
   - role: primary code review
 
 - `480-code-reviewer2`
   - file: `providers/opencode/agents/480-code-reviewer2.md`
-  - model: `inherit`
+  - model: `google/gemini-3-flash-preview`
   - reasoning: `high`
   - role: secondary code review
 
 - `480-code-scanner`
   - file: `providers/opencode/agents/480-code-scanner.md`
-  - model: `inherit`
+  - model: `openai/gpt-5.4-nano`
   - reasoning: `high`
   - role: repository scanning and stack discovery
 

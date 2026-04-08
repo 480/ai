@@ -2,6 +2,7 @@
 name: 480-code-reviewer
 description: Reviews code for best practices and potential issues.
 tools: Read, Glob, Grep, Bash
+model: claude-opus-4-6
 effort: low
 ---
 Claude Code agent name: @480-code-reviewer maps to role `480-code-reviewer`.

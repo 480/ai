@@ -15,7 +15,7 @@ Install the five FEZ (480, Four-Eight-Zero) agents into OpenCode, Claude Code, C
 - Claude Code: user/project-scope install; `480-architect` optional, and the installer asks whether to merge the experimental agent teams + desktop notification flags into the `env` section of `settings.json`.
 - Codex CLI: user/project-scope install; root `AGENTS.md` 480ai block provides architect + 4 subagents, review is `480-code-reviewer` + `480-code-reviewer2`, install writes `features.multi_agent`, `agents.max_depth = 1`, `agents.max_threads = 200` plus optional desktop notifications to `config.toml`, and Codex user scope defaults to `~/.codex` but can target an alternate root such as `~/.codex-harness` with `--codex-user-root` or `BOOTSTRAP_CODEX_USER_ROOT`.
 - Qwen Code: user/project-scope install; uses YAML frontmatter + Markdown body subagent format, copies agents to `~/.qwen/agents/` or `<project>/.qwen/agents/`, `480-architect` optional via `default_agent` setting.
-- Gemini CLI: user/project-scope install; uses YAML frontmatter + Markdown body subagent format (same as Qwen Code), copies agents to `~/.gemini/agents/` or `<project>/.gemini/agents/`, subagents are experimental and require `{"experimental": {"enableSubagents": true}}` in `settings.json`.
+- Gemini CLI: user/project-scope install; uses YAML frontmatter + Markdown body subagent format, copies agents to `~/.gemini/agents/` or `<project>/.gemini/agents/`, and ensures `{"experimental": {"enableAgents": true, "enableSubagents": true}}` in `settings.json` for compatibility across Gemini CLI versions.
 
 ## Install
 

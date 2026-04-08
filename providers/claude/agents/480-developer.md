@@ -2,6 +2,7 @@
 name: 480-developer
 description: Writes careful and considered code.
 tools: Read, Write, Edit, Glob, Grep, Bash, WebFetch
+model: claude-sonnet-4-6
 effort: medium
 ---
 Claude Code agent name: @480-developer maps to role `480-developer`.

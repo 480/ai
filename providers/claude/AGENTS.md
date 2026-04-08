@@ -15,7 +15,7 @@ Documentation for the checked-in Claude Code artifacts and install behavior.
 - `480-architect`
   - maps from: `480-architect`
   - file: `providers/claude/agents/480-architect.md`
-  - model: `inherit`
+  - model: `claude-opus-4-6`
   - effort: `max`
 
 ## Subagents
@@ -23,25 +23,25 @@ Documentation for the checked-in Claude Code artifacts and install behavior.
 - `480-developer`
   - maps from: `480-developer`
   - file: `providers/claude/agents/480-developer.md`
-  - model: `inherit`
+  - model: `claude-sonnet-4-6`
   - effort: `medium`
 
 - `480-code-reviewer`
   - maps from: `480-code-reviewer`
   - file: `providers/claude/agents/480-code-reviewer.md`
-  - model: `inherit`
+  - model: `claude-opus-4-6`
   - effort: `low`
 
 - `480-code-reviewer2`
   - maps from: `480-code-reviewer2`
   - file: `providers/claude/agents/480-code-reviewer2.md`
-  - model: `inherit`
+  - model: `claude-sonnet-4-6`
   - effort: `low`
 
 - `480-code-scanner`
   - maps from: `480-code-scanner`
   - file: `providers/claude/agents/480-code-scanner.md`
-  - model: `inherit`
+  - model: `haiku`
   - effort: `low`
 
 ## Install names and paths
