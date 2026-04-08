@@ -500,6 +500,168 @@ CODEX_MODEL_SELECTION_SCHEMA = ProviderModelSelectionSchema(
 )
 
 
+QWEN_CODE_MODEL_SELECTION_SCHEMA = ProviderModelSelectionSchema(
+    supported_modes=("recommended", "advanced"),
+    recommended=ProviderRecommendedModelProfile(
+        source="fixed",
+        roles={
+            "480-architect": _role_config("inherit", "inherit"),
+            "480-developer": _role_config("inherit", "inherit"),
+            "480-code-scanner": _role_config("inherit", "inherit"),
+            "480-code-reviewer": _role_config("inherit", "inherit"),
+            "480-code-reviewer2": _role_config("inherit", "inherit"),
+        },
+    ),
+    advanced={
+        "480-architect": (
+            _role_option("qwen-coder-plus-high", "Qwen Coder Plus / high", model="qwen-coder-plus", effort="high"),
+            _role_option("qwen-coder-plus-max", "Qwen Coder Plus / max", model="qwen-coder-plus", effort="max"),
+            _role_option(
+                "qwen-coder-flash-high",
+                "Qwen Coder Flash / high",
+                model="qwen-coder-flash",
+                effort="high",
+            ),
+        ),
+        "480-developer": (
+            _role_option("qwen-coder-plus-medium", "Qwen Coder Plus / medium", model="qwen-coder-plus", effort="medium"),
+            _role_option("qwen-coder-plus-low", "Qwen Coder Plus / low", model="qwen-coder-plus", effort="low"),
+            _role_option(
+                "qwen-coder-flash-medium",
+                "Qwen Coder Flash / medium",
+                model="qwen-coder-flash",
+                effort="medium",
+            ),
+        ),
+        "480-code-reviewer": (
+            _role_option("qwen-coder-plus-high", "Qwen Coder Plus / high", model="qwen-coder-plus", effort="high"),
+            _role_option("qwen-coder-plus-medium", "Qwen Coder Plus / medium", model="qwen-coder-plus", effort="medium"),
+            _role_option(
+                "qwen-coder-flash-low",
+                "Qwen Coder Flash / low",
+                model="qwen-coder-flash",
+                effort="low",
+            ),
+        ),
+        "480-code-reviewer2": (
+            _role_option(
+                "qwen-coder-plus-medium",
+                "Qwen Coder Plus / medium",
+                model="qwen-coder-plus",
+                effort="medium",
+            ),
+            _role_option(
+                "qwen-coder-flash-medium",
+                "Qwen Coder Flash / medium",
+                model="qwen-coder-flash",
+                effort="medium",
+            ),
+            _role_option(
+                "qwen-coder-flash-low",
+                "Qwen Coder Flash / low",
+                model="qwen-coder-flash",
+                effort="low",
+            ),
+        ),
+        "480-code-scanner": (
+            _role_option(
+                "qwen-coder-flash-low",
+                "Qwen Coder Flash / low",
+                model="qwen-coder-flash",
+                effort="low",
+            ),
+            _role_option(
+                "qwen-coder-flash-medium",
+                "Qwen Coder Flash / medium",
+                model="qwen-coder-flash",
+                effort="medium",
+            ),
+        ),
+    },
+)
+
+
+GEMINI_MODEL_SELECTION_SCHEMA = ProviderModelSelectionSchema(
+    supported_modes=("recommended", "advanced"),
+    recommended=ProviderRecommendedModelProfile(
+        source="fixed",
+        roles={
+            "480-architect": _role_config("inherit", "inherit"),
+            "480-developer": _role_config("inherit", "inherit"),
+            "480-code-scanner": _role_config("inherit", "inherit"),
+            "480-code-reviewer": _role_config("inherit", "inherit"),
+            "480-code-reviewer2": _role_config("inherit", "inherit"),
+        },
+    ),
+    advanced={
+        "480-architect": (
+            _role_option("gemini-2.5-pro-high", "Gemini 2.5 Pro / high", model="gemini-2.5-pro", effort="high"),
+            _role_option("gemini-2.5-pro-max", "Gemini 2.5 Pro / max", model="gemini-2.5-pro", effort="max"),
+            _role_option(
+                "gemini-2.5-flash-high",
+                "Gemini 2.5 Flash / high",
+                model="gemini-2.5-flash",
+                effort="high",
+            ),
+        ),
+        "480-developer": (
+            _role_option("gemini-2.5-pro-medium", "Gemini 2.5 Pro / medium", model="gemini-2.5-pro", effort="medium"),
+            _role_option("gemini-2.5-pro-low", "Gemini 2.5 Pro / low", model="gemini-2.5-pro", effort="low"),
+            _role_option(
+                "gemini-2.5-flash-medium",
+                "Gemini 2.5 Flash / medium",
+                model="gemini-2.5-flash",
+                effort="medium",
+            ),
+        ),
+        "480-code-reviewer": (
+            _role_option("gemini-2.5-pro-high", "Gemini 2.5 Pro / high", model="gemini-2.5-pro", effort="high"),
+            _role_option("gemini-2.5-pro-medium", "Gemini 2.5 Pro / medium", model="gemini-2.5-pro", effort="medium"),
+            _role_option(
+                "gemini-2.5-flash-low",
+                "Gemini 2.5 Flash / low",
+                model="gemini-2.5-flash",
+                effort="low",
+            ),
+        ),
+        "480-code-reviewer2": (
+            _role_option(
+                "gemini-2.5-flash-medium",
+                "Gemini 2.5 Flash / medium",
+                model="gemini-2.5-flash",
+                effort="medium",
+            ),
+            _role_option(
+                "gemini-2.5-flash-lite-medium",
+                "Gemini 2.5 Flash-Lite / medium",
+                model="gemini-2.5-flash-lite",
+                effort="medium",
+            ),
+            _role_option(
+                "gemini-2.5-flash-low",
+                "Gemini 2.5 Flash / low",
+                model="gemini-2.5-flash",
+                effort="low",
+            ),
+        ),
+        "480-code-scanner": (
+            _role_option(
+                "gemini-2.5-flash-lite-low",
+                "Gemini 2.5 Flash-Lite / low",
+                model="gemini-2.5-flash-lite",
+                effort="low",
+            ),
+            _role_option(
+                "gemini-2.5-flash-low",
+                "Gemini 2.5 Flash / low",
+                model="gemini-2.5-flash",
+                effort="low",
+            ),
+        ),
+    },
+)
+
+
 def bootstrap_state_paths(state_dir: Path) -> BootstrapStatePaths:
     return BootstrapStatePaths(
         state_dir=state_dir,
@@ -600,6 +762,45 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
             agent_file_extension=".toml",
         ),
         model_selection_schema=CODEX_MODEL_SELECTION_SCHEMA,
+        bundle_name_key="name",
+    ),
+    ProviderSpec(
+        identifier="qwen",
+        label="Qwen Code",
+        cli_binary_name="qwen",
+        supported_scopes=("user", "project"),
+        user_config_dir_parts=(".qwen",),
+        project_config_dirname=".qwen",
+        config_filename="settings.json",
+        default_activation=DefaultActivation(
+            config_key="default_agent",
+            managed_value="480-architect",
+        ),
+        default_activation_default=False,
+        artifacts=ProviderArtifacts(
+            agents_dirname="providers/qwen/agents",
+            index_filename="providers/qwen/AGENTS.md",
+            agent_file_extension=".md",
+        ),
+        model_selection_schema=QWEN_CODE_MODEL_SELECTION_SCHEMA,
+        bundle_name_key="name",
+    ),
+    ProviderSpec(
+        identifier="gemini",
+        label="Gemini CLI",
+        cli_binary_name="gemini",
+        supported_scopes=("user", "project"),
+        user_config_dir_parts=(".gemini",),
+        project_config_dirname=".gemini",
+        config_filename="settings.json",
+        default_activation=None,
+        default_activation_default=False,
+        artifacts=ProviderArtifacts(
+            agents_dirname="providers/gemini/agents",
+            index_filename="providers/gemini/AGENTS.md",
+            agent_file_extension=".md",
+        ),
+        model_selection_schema=GEMINI_MODEL_SELECTION_SCHEMA,
         bundle_name_key="name",
     ),
 )

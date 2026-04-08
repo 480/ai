@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import re
 import shutil
 import tempfile
 import shlex
+import copy
 from importlib import import_module
 from pathlib import Path
 
@@ -178,6 +180,38 @@ def claude_notification(payload: dict) -> dict | None:
     }
 
 
+def qwen_notification(payload: dict) -> dict | None:
+    if payload.get("hook_event_name") != "Stop":
+        return None
+
+    cwd = payload.get("cwd") or payload.get("directory")
+    message = payload.get("message") or payload.get("final_response", "")
+    if not message:
+        message = "Qwen Code session completed"
+
+    return {
+        "title": f"Qwen Code completed ({project_name(cwd) or 'global'})",
+        "message": message,
+        "group": f"qwen:{cwd or 'global'}",
+    }
+
+
+def gemini_notification(payload: dict) -> dict | None:
+    if payload.get("hook_event_name") != "SessionEnd":
+        return None
+
+    cwd = payload.get("cwd") or payload.get("directory")
+    message = payload.get("message") or payload.get("final_response", "")
+    if not message:
+        message = "Gemini CLI session completed"
+
+    return {
+        "title": f"Gemini CLI completed ({project_name(cwd) or 'global'})",
+        "message": message,
+        "group": f"gemini:{cwd or 'global'}",
+    }
+
+
 def build_notification(source: str, payload: dict) -> dict | None:
     if source == "codex":
         return codex_notification(payload)
@@ -185,6 +219,10 @@ def build_notification(source: str, payload: dict) -> dict | None:
         return opencode_notification(payload)
     if source == "claude":
         return claude_notification(payload)
+    if source == "qwen":
+        return qwen_notification(payload)
+    if source == "gemini":
+        return gemini_notification(payload)
     return None
 
 
@@ -528,6 +566,258 @@ CODEX_REQUIRED_SETTINGS = (
     ("agents", "max_depth", "1", 1),
     ("agents", "max_threads", "200", 200),
 )
+GEMINI_REQUIRED_SETTINGS = (
+    ("experimental", "enableAgents", True),
+    ("experimental", "enableSubagents", True),
+)
+GEMINI_SYSTEM_PROMPT_OVERRIDE_STATE_KEY = "gemini_system_prompt_override"
+GEMINI_SYSTEM_PROMPT_OVERRIDE_ENV_START = "# 480ai managed (gemini): system prompt override start"
+GEMINI_SYSTEM_PROMPT_OVERRIDE_ENV_END = "# 480ai managed (gemini): system prompt override end"
+GEMINI_SYSTEM_PROMPT_OVERRIDE_MANAGED_CONTENTS_KEY = "managed_contents"
+GEMINI_SYSTEM_PROMPT_OVERRIDE_MANAGED_SHA256_KEY = "managed_sha256"
+
+
+def _sha256_text(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def gemini_system_prompt_path(target: InstallTarget) -> Path:
+    return target.paths.config_dir / "system.md"
+
+
+def gemini_dotenv_path(target: InstallTarget) -> Path:
+    return target.paths.config_dir / ".env"
+
+
+def gemini_system_prompt_backup_path(target: InstallTarget) -> Path:
+    return target.paths.state_dir / "system.md.orig"
+
+
+def _strip_markdown_yaml_frontmatter(contents: str) -> str:
+    if not contents.startswith("---"):
+        return contents
+    lines = contents.splitlines()
+    if not lines or lines[0].strip() != "---":
+        return contents
+    for idx in range(1, len(lines)):
+        if lines[idx].strip() == "---":
+            return "\n".join(lines[idx + 1 :]).lstrip("\n")
+    return contents
+
+
+def gemini_system_prompt_from_architect_agent(contents: str) -> str:
+    stripped = _strip_markdown_yaml_frontmatter(contents)
+    lines = stripped.splitlines()
+    if lines and lines[0].startswith("Gemini CLI agent name:"):
+        lines = lines[1:]
+        while lines and not lines[0].strip():
+            lines = lines[1:]
+    body = "\n".join(lines).rstrip("\n") + "\n"
+    delegation_preface = (
+        "## Subagent delegation (Gemini CLI)\n"
+        "\n"
+        "Gemini CLI subagents are exposed as tools.\n"
+        "When delegating work, call the subagent tool directly (do not only mention an agent name in text).\n"
+        "For the FEZ workflow, delegate implementation to `_480-developer` and run dual reviews via `_480-code-reviewer` and `_480-code-reviewer2`.\n"
+        "\n"
+    )
+    if "## Subagent delegation (Gemini CLI)" not in body:
+        body = delegation_preface + body
+    if "${SubAgents}" not in body:
+        body = "${SubAgents}\n\n" + body
+    return body
+
+
+def ensure_gemini_system_prompt_override(
+    target: InstallTarget,
+    state: dict,
+    source_agents_dir: Path,
+    *,
+    enabled: bool,
+) -> bool:
+    if target.name != "gemini":
+        return False
+
+    override_state = state.get(GEMINI_SYSTEM_PROMPT_OVERRIDE_STATE_KEY)
+    if not isinstance(override_state, dict):
+        override_state = {}
+        state[GEMINI_SYSTEM_PROMPT_OVERRIDE_STATE_KEY] = override_state
+    override_state["enabled"] = bool(enabled)
+
+    if not enabled:
+        return False
+
+    ensure_path_hierarchy_safe(target.paths.config_dir)
+    system_path = gemini_system_prompt_path(target)
+    dotenv_path = gemini_dotenv_path(target)
+    ensure_path_hierarchy_safe(system_path)
+    ensure_path_hierarchy_safe(dotenv_path)
+
+    architect_source = source_agent_path(source_agents_dir, target, "480-architect")
+    managed_system_md = gemini_system_prompt_from_architect_agent(architect_source.read_text(encoding="utf-8"))
+
+    changed = False
+    system_existed_before = system_path.exists()
+    current_system_md = system_path.read_text(encoding="utf-8") if system_existed_before else ""
+    system_matches_managed_before_install = system_existed_before and current_system_md == managed_system_md
+    system_md_state = override_state.get("system_md")
+    if not isinstance(system_md_state, dict):
+        system_md_state = {}
+        override_state["system_md"] = system_md_state
+    existed_before_install = system_md_state.get("existed_before_install")
+    if not isinstance(existed_before_install, bool):
+        system_md_state["existed_before_install"] = system_existed_before
+        existed_before_install = system_md_state["existed_before_install"]
+    system_md_state[GEMINI_SYSTEM_PROMPT_OVERRIDE_MANAGED_CONTENTS_KEY] = managed_system_md
+    system_md_state[GEMINI_SYSTEM_PROMPT_OVERRIDE_MANAGED_SHA256_KEY] = _sha256_text(managed_system_md)
+    if existed_before_install:
+        backup_path = gemini_system_prompt_backup_path(target)
+        ensure_path_hierarchy_safe(backup_path)
+        if not backup_path.exists():
+            if system_existed_before and not system_matches_managed_before_install:
+                backup_path.parent.mkdir(parents=True, exist_ok=True)
+                backup_path.write_bytes(system_path.read_bytes())
+        if backup_path.exists():
+            system_md_state["backup"] = str(backup_path.relative_to(target.paths.state_dir))
+        else:
+            system_md_state.pop("backup", None)
+
+    if current_system_md != managed_system_md:
+        system_path.parent.mkdir(parents=True, exist_ok=True)
+        system_path.write_text(managed_system_md, encoding="utf-8")
+        changed = True
+
+    dotenv_existed_before = dotenv_path.exists()
+    dotenv_state = override_state.get("dotenv")
+    if not isinstance(dotenv_state, dict):
+        dotenv_state = {}
+        override_state["dotenv"] = dotenv_state
+    dotenv_existed_before_install = dotenv_state.get("existed_before_install")
+    if not isinstance(dotenv_existed_before_install, bool):
+        dotenv_state["existed_before_install"] = dotenv_existed_before
+    dotenv_contents = dotenv_path.read_text(encoding="utf-8") if dotenv_existed_before else ""
+    if GEMINI_SYSTEM_PROMPT_OVERRIDE_ENV_START not in dotenv_contents:
+        block = "\n".join(
+            (
+                GEMINI_SYSTEM_PROMPT_OVERRIDE_ENV_START,
+                "GEMINI_SYSTEM_MD=1",
+                GEMINI_SYSTEM_PROMPT_OVERRIDE_ENV_END,
+                "",
+            )
+        )
+        if dotenv_contents and not dotenv_contents.endswith("\n"):
+            dotenv_contents += "\n"
+        if dotenv_contents.strip():
+            dotenv_contents = dotenv_contents.rstrip("\n") + "\n\n" + block
+        else:
+            dotenv_contents = block
+        dotenv_path.parent.mkdir(parents=True, exist_ok=True)
+        dotenv_path.write_text(dotenv_contents, encoding="utf-8")
+        changed = True
+
+    return changed
+
+
+def restore_gemini_system_prompt_override(
+    target: InstallTarget,
+    state: dict,
+    source_agents_dir: Path,
+) -> bool:
+    if target.name != "gemini":
+        return False
+
+    override_state = state.get(GEMINI_SYSTEM_PROMPT_OVERRIDE_STATE_KEY)
+    if not isinstance(override_state, dict) or override_state.get("enabled") is not True:
+        return False
+
+    system_state = override_state.get("system_md")
+    dotenv_state = override_state.get("dotenv")
+    system_existed_before = isinstance(system_state, dict) and system_state.get("existed_before_install") is True
+    dotenv_existed_before_install: bool | None
+    if isinstance(dotenv_state, dict) and isinstance(dotenv_state.get("existed_before_install"), bool):
+        dotenv_existed_before_install = dotenv_state.get("existed_before_install")
+    else:
+        dotenv_existed_before_install = None
+
+    system_path = gemini_system_prompt_path(target)
+    dotenv_path = gemini_dotenv_path(target)
+    ensure_path_hierarchy_safe(system_path)
+    ensure_path_hierarchy_safe(dotenv_path)
+
+    managed_system_md: str | None = None
+    managed_system_md_sha256: str | None = None
+    if isinstance(system_state, dict):
+        managed_state_contents = system_state.get(GEMINI_SYSTEM_PROMPT_OVERRIDE_MANAGED_CONTENTS_KEY)
+        if isinstance(managed_state_contents, str):
+            managed_system_md = managed_state_contents
+        managed_state_sha = system_state.get(GEMINI_SYSTEM_PROMPT_OVERRIDE_MANAGED_SHA256_KEY)
+        if isinstance(managed_state_sha, str) and managed_state_sha.strip():
+            managed_system_md_sha256 = managed_state_sha.strip()
+
+    if managed_system_md is None and managed_system_md_sha256 is None:
+        architect_source = source_agent_path(source_agents_dir, target, "480-architect")
+        managed_system_md = gemini_system_prompt_from_architect_agent(architect_source.read_text(encoding="utf-8"))
+
+    changed = False
+    backup_path = gemini_system_prompt_backup_path(target)
+    ensure_path_hierarchy_safe(backup_path)
+
+    system_matches_managed = False
+    if system_path.exists():
+        current_system_md = system_path.read_text(encoding="utf-8")
+        if managed_system_md is not None:
+            system_matches_managed = current_system_md == managed_system_md
+        elif managed_system_md_sha256 is not None:
+            system_matches_managed = _sha256_text(current_system_md) == managed_system_md_sha256
+
+    restored_system = False
+    if system_matches_managed:
+        if system_existed_before:
+            if backup_path.exists():
+                system_path.write_bytes(backup_path.read_bytes())
+                changed = True
+                restored_system = True
+        else:
+            system_path.unlink()
+            changed = True
+            restored_system = True
+    elif system_existed_before and not system_path.exists() and backup_path.exists():
+        system_path.parent.mkdir(parents=True, exist_ok=True)
+        system_path.write_bytes(backup_path.read_bytes())
+        changed = True
+        restored_system = True
+    if restored_system and backup_path.exists():
+        backup_path.unlink()
+        changed = True
+    if not system_existed_before and backup_path.exists():
+        backup_path.unlink()
+        changed = True
+
+    if dotenv_path.exists():
+        contents = dotenv_path.read_text(encoding="utf-8")
+        if GEMINI_SYSTEM_PROMPT_OVERRIDE_ENV_START in contents:
+            pattern = re.compile(
+                rf"(?ms)^[ \t]*{re.escape(GEMINI_SYSTEM_PROMPT_OVERRIDE_ENV_START)}\n.*?^{re.escape(GEMINI_SYSTEM_PROMPT_OVERRIDE_ENV_END)}\n?"
+            )
+            match = pattern.search(contents)
+            if match is None:
+                updated = contents
+            else:
+                removal_start = match.start()
+                removal_end = match.end()
+                if removal_start >= 2 and contents[removal_start - 2 : removal_start] == "\n\n":
+                    removal_start -= 1
+                updated = contents[:removal_start] + contents[removal_end:]
+            if updated.strip():
+                dotenv_path.write_text(updated, encoding="utf-8")
+            elif dotenv_existed_before_install is False:
+                dotenv_path.unlink()
+            else:
+                dotenv_path.write_text("", encoding="utf-8")
+            changed = True
+
+    state.pop(GEMINI_SYSTEM_PROMPT_OVERRIDE_STATE_KEY, None)
+    return changed
 
 
 def _json_scalar(value: object) -> object:
@@ -537,8 +827,10 @@ def _json_scalar(value: object) -> object:
 
 
 def _json_value(value: object) -> object:
-    if value is None or isinstance(value, (bool, int, float, str, list, dict)):
+    if value is None or isinstance(value, (bool, int, float, str)):
         return value
+    if isinstance(value, (list, dict)):
+        return copy.deepcopy(value)
     return str(value)
 
 
@@ -547,6 +839,13 @@ def _managed_config_state(state: dict) -> dict[str, object] | None:
     if not isinstance(managed_config, dict):
         return None
     return managed_config
+
+
+def _nested_json_value(data: dict, table_name: str, key_name: str) -> tuple[bool, object]:
+    table = data.get(table_name)
+    if not isinstance(table, dict) or key_name not in table:
+        return False, None
+    return True, table[key_name]
 
 
 def managed_config_existed_before_install(state: dict) -> bool:
@@ -558,7 +857,10 @@ def managed_config_existed_before_install(state: dict) -> bool:
 
 def capture_managed_config_state_on_install(target: InstallTarget, state: dict, config: dict) -> None:
     config_path = target.paths.config_file
-    if config_path is None or MANAGED_CONFIG_STATE_KEY in state:
+    if config_path is None:
+        return
+    existing_managed_config = state.get(MANAGED_CONFIG_STATE_KEY)
+    if isinstance(existing_managed_config, dict):
         return
 
     managed_config: dict[str, object] = {
@@ -597,6 +899,16 @@ def capture_managed_config_state_on_install(target: InstallTarget, state: dict, 
                 "present": False,
                 "value": None,
             }
+    elif target.name == "gemini":
+        settings: dict[str, dict[str, object]] = {}
+        for table_name, key_name, _managed_value in GEMINI_REQUIRED_SETTINGS:
+            full_key = f"{table_name}.{key_name}"
+            present, value = _nested_json_value(config, table_name, key_name)
+            settings[full_key] = {
+                "present": present,
+                "value": _json_value(value) if present else None,
+            }
+        managed_config["gemini_required_settings"] = settings
 
     state[MANAGED_CONFIG_STATE_KEY] = managed_config
 
@@ -1058,6 +1370,167 @@ def merge_claude_desktop_notification_hook(
     return True
 
 
+# ---------------------------------------------------------------------------
+# Qwen Code & Gemini CLI desktop notification hooks
+# ---------------------------------------------------------------------------
+
+def _json_notification_hook_entry(command: str) -> dict:
+    return {
+        "type": "command",
+        "command": command,
+    }
+
+
+def _merge_json_notification_hook(
+    config: dict,
+    hook_event_key: str,
+    new_entry: dict,
+) -> bool:
+    hooks = config.get("hooks")
+    if not isinstance(hooks, dict):
+        config["hooks"] = {hook_event_key: [new_entry]}
+        return True
+    event_list = hooks.get(hook_event_key)
+    if not isinstance(event_list, list):
+        hooks[hook_event_key] = [new_entry]
+        return True
+    if new_entry in event_list:
+        return False
+    event_list.append(new_entry)
+    return True
+
+
+def _restore_json_notification_hook(
+    config: dict,
+    hook_event_key: str,
+    installed_entry: dict,
+    previous_value: object,
+    had_previous_value: bool,
+) -> bool:
+    hooks = config.get("hooks")
+    if not isinstance(hooks, dict):
+        return False
+    event_list = hooks.get(hook_event_key)
+    if not isinstance(event_list, list):
+        return False
+    if installed_entry not in event_list:
+        return False
+    event_list = [item for item in event_list if item != installed_entry]
+    if had_previous_value:
+        hooks[hook_event_key] = previous_value  # type: ignore[assignment]
+    elif event_list:
+        hooks[hook_event_key] = event_list
+    else:
+        del hooks[hook_event_key]
+        if not hooks:
+            del config["hooks"]
+    return True
+
+
+def merge_qwen_desktop_notification_hook(
+    target: InstallTarget,
+    state: dict,
+    config: dict,
+    *,
+    command: str,
+    enabled: bool,
+) -> bool:
+    if not enabled or target.name != "qwen":
+        return False
+
+    hook_entry = _json_notification_hook_entry(command)
+
+    managed_config = _managed_config_state(state)
+    if managed_config is None:
+        managed_config = {"existed_before_install": True}
+        state[MANAGED_CONFIG_STATE_KEY] = managed_config
+    if not isinstance(managed_config.get("qwen_notification"), dict):
+        hooks = config.get("hooks")
+        if isinstance(hooks, dict) and "Stop" in hooks:
+            managed_config["qwen_notification"] = {"present": True, "value": _json_value(hooks.get("Stop"))}
+        else:
+            managed_config["qwen_notification"] = {"present": False, "value": None}
+
+    return _merge_json_notification_hook(config, "Stop", hook_entry)
+
+
+def restore_qwen_desktop_notification_hook(
+    target: InstallTarget,
+    state: dict,
+    config: dict,
+    *,
+    command: str,
+) -> bool:
+    if target.name != "qwen":
+        return False
+
+    hook_entry = _json_notification_hook_entry(command)
+    managed_config = _managed_config_state(state)
+    if managed_config is None:
+        return _restore_json_notification_hook(config, "Stop", hook_entry, None, False)
+
+    managed = managed_config.get("qwen_notification")
+    if not isinstance(managed, dict):
+        return _restore_json_notification_hook(config, "Stop", hook_entry, None, False)
+
+    had_previous = managed.get("present") is True
+    previous_value = managed.get("value")
+
+    return _restore_json_notification_hook(config, "Stop", hook_entry, previous_value, had_previous)
+
+
+def merge_gemini_desktop_notification_hook(
+    target: InstallTarget,
+    state: dict,
+    config: dict,
+    *,
+    command: str,
+    enabled: bool,
+) -> bool:
+    if not enabled or target.name != "gemini":
+        return False
+
+    hook_entry = _json_notification_hook_entry(command)
+
+    managed_config = _managed_config_state(state)
+    if managed_config is None:
+        managed_config = {"existed_before_install": True}
+        state[MANAGED_CONFIG_STATE_KEY] = managed_config
+    if not isinstance(managed_config.get("gemini_notification"), dict):
+        hooks = config.get("hooks")
+        if isinstance(hooks, dict) and "SessionEnd" in hooks:
+            managed_config["gemini_notification"] = {"present": True, "value": _json_value(hooks.get("SessionEnd"))}
+        else:
+            managed_config["gemini_notification"] = {"present": False, "value": None}
+
+    return _merge_json_notification_hook(config, "SessionEnd", hook_entry)
+
+
+def restore_gemini_desktop_notification_hook(
+    target: InstallTarget,
+    state: dict,
+    config: dict,
+    *,
+    command: str,
+) -> bool:
+    if target.name != "gemini":
+        return False
+
+    managed_config = _managed_config_state(state)
+    hook_entry = _json_notification_hook_entry(command)
+    if managed_config is None:
+        return _restore_json_notification_hook(config, "SessionEnd", hook_entry, None, False)
+
+    managed = managed_config.get("gemini_notification")
+    if not isinstance(managed, dict):
+        return _restore_json_notification_hook(config, "SessionEnd", hook_entry, None, False)
+
+    had_previous = managed.get("present") is True
+    previous_value = managed.get("value")
+
+    return _restore_json_notification_hook(config, "SessionEnd", hook_entry, previous_value, had_previous)
+
+
 def restore_claude_desktop_notification_hook(
     target: InstallTarget,
     state: dict,
@@ -1242,6 +1715,122 @@ def merge_codex_subagent_settings(target: InstallTarget) -> bool:
 
     write_text_atomic(config_path, updated.rstrip("\n") + "\n")
     return True
+
+
+def merge_gemini_subagent_settings(target: InstallTarget, state: dict, config: dict) -> bool:
+    if target.name != "gemini":
+        return False
+
+    managed_config = _managed_config_state(state)
+    if managed_config is None:
+        managed_config = {"existed_before_install": True}
+        state[MANAGED_CONFIG_STATE_KEY] = managed_config
+    if not isinstance(managed_config.get("gemini_required_settings"), dict):
+        settings: dict[str, dict[str, object]] = {}
+        for table_name, key_name, _managed_value in GEMINI_REQUIRED_SETTINGS:
+            full_key = f"{table_name}.{key_name}"
+            present, value = _nested_json_value(config, table_name, key_name)
+            settings[full_key] = {
+                "present": present,
+                "value": _json_value(value) if present else None,
+            }
+        managed_config["gemini_required_settings"] = settings
+
+    changed = False
+    for table_name, key_name, managed_value in GEMINI_REQUIRED_SETTINGS:
+        table = config.get(table_name)
+        if table is None:
+            table = {}
+            config[table_name] = table
+        if not isinstance(table, dict):
+            config_path = target.paths.config_file
+            if config_path is None:
+                raise SystemExit("Gemini subagents require a JSON object config file.")
+            raise SystemExit(
+                f"Expected JSON object at {config_path} for {table_name}. "
+                "Enable Gemini agents by setting experimental.enableAgents=true and experimental.enableSubagents=true."
+            )
+        if table.get(key_name) is managed_value:
+            continue
+        table[key_name] = managed_value
+        changed = True
+    return changed
+
+
+def migrate_qwen_selected_auth_type(target: InstallTarget, config: dict) -> bool:
+    if target.name != "qwen":
+        return False
+
+    # Qwen Code settings migrated auth selection from:
+    # - V1: selectedAuthType (top-level)
+    # - V2+: security.auth.selectedType
+    legacy_selected_auth_type = config.get("selectedAuthType")
+    if not isinstance(legacy_selected_auth_type, str):
+        return False
+    normalized = legacy_selected_auth_type.strip()
+    if not normalized:
+        return False
+
+    supported_auth_types = {"openai", "anthropic", "qwen-oauth", "gemini", "vertex-ai"}
+    if normalized not in supported_auth_types:
+        return False
+
+    security = config.get("security")
+    if security is None:
+        security = {}
+        config["security"] = security
+    if not isinstance(security, dict):
+        return False
+    auth = security.get("auth")
+    if auth is None:
+        auth = {}
+        security["auth"] = auth
+    if not isinstance(auth, dict):
+        return False
+
+    selected_type = auth.get("selectedType")
+    if isinstance(selected_type, str) and selected_type.strip():
+        return False
+
+    auth["selectedType"] = normalized
+    return True
+
+
+def restore_gemini_subagent_settings(target: InstallTarget, state: dict, config: dict) -> bool:
+    if target.name != "gemini":
+        return False
+
+    managed_config = _managed_config_state(state)
+    if managed_config is None:
+        return False
+    settings_state = managed_config.get("gemini_required_settings")
+    if not isinstance(settings_state, dict):
+        return False
+
+    changed = False
+    for table_name, key_name, managed_value in GEMINI_REQUIRED_SETTINGS:
+        full_key = f"{table_name}.{key_name}"
+        setting_state = settings_state.get(full_key)
+        if not isinstance(setting_state, dict):
+            continue
+
+        present, current_value = _nested_json_value(config, table_name, key_name)
+        if not present or current_value is not managed_value:
+            continue
+
+        table = config.get(table_name)
+        if not isinstance(table, dict):
+            continue
+
+        if setting_state.get("present") is True:
+            table[key_name] = _json_value(setting_state.get("value"))
+        else:
+            table.pop(key_name, None)
+            if not table:
+                config.pop(table_name, None)
+        changed = True
+
+    return changed
 
 
 def restore_codex_subagent_settings(target: InstallTarget, state: dict, config: dict) -> bool:
@@ -2210,6 +2799,16 @@ def install(
             shutil.copy2(source, destination)
         state["managed_file_metadata"][name] = file_metadata(destination)
     config_changed = merge_claude_teams_env_setting(target, config, enabled=enable_claude_teams)
+    config_changed = merge_gemini_subagent_settings(target, state, config) or config_changed
+    config_changed = migrate_qwen_selected_auth_type(target, config) or config_changed
+    if target.name == "gemini" and not manage_default_activation:
+        restore_gemini_system_prompt_override(target, state, source_agents_dir)
+    ensure_gemini_system_prompt_override(
+        target,
+        state,
+        source_agents_dir,
+        enabled=bool(manage_default_activation),
+    )
     if activation is not None and manage_default_activation:
         config_key, managed_value = activation
         config[config_key] = managed_value
@@ -2232,6 +2831,26 @@ def install(
         )
         if desktop_notification_changed:
             write_target_config(target, config)
+    if enable_desktop_notifications is True and target.name == "qwen":
+        desktop_notification_changed = merge_qwen_desktop_notification_hook(
+            target,
+            state,
+            config,
+            command=f"{shlex.quote(str(desktop_notification_hook_path(target)))} qwen",
+            enabled=True,
+        )
+        if desktop_notification_changed:
+            write_target_config(target, config)
+    if enable_desktop_notifications is True and target.name == "gemini":
+        desktop_notification_changed = merge_gemini_desktop_notification_hook(
+            target,
+            state,
+            config,
+            command=f"{shlex.quote(str(desktop_notification_hook_path(target)))} gemini",
+            enabled=True,
+        )
+        if desktop_notification_changed:
+            write_target_config(target, config)
     if enable_desktop_notifications is False:
         if target.name == "codex":
             desktop_notification_changed = restore_codex_desktop_notification_hook(target, state, config)
@@ -2241,6 +2860,24 @@ def install(
                 state,
                 config,
                 command=f"{shlex.quote(str(desktop_notification_hook_path(target)))} claude",
+            )
+            if desktop_notification_changed:
+                write_target_config(target, config)
+        elif target.name == "qwen":
+            desktop_notification_changed = restore_qwen_desktop_notification_hook(
+                target,
+                state,
+                config,
+                command=f"{shlex.quote(str(desktop_notification_hook_path(target)))} qwen",
+            )
+            if desktop_notification_changed:
+                write_target_config(target, config)
+        elif target.name == "gemini":
+            desktop_notification_changed = restore_gemini_desktop_notification_hook(
+                target,
+                state,
+                config,
+                command=f"{shlex.quote(str(desktop_notification_hook_path(target)))} gemini",
             )
             if desktop_notification_changed:
                 write_target_config(target, config)
@@ -2262,12 +2899,78 @@ def uninstall(target: InstallTarget, source_agents_dir: Path, agent_names: list[
         print("No 480ai install state found. Nothing to uninstall.")
         return
 
-    config = read_target_config(target)
-
     ensure_path_hierarchy_safe(target.paths.installed_agents_dir)
     ensure_path_hierarchy_safe(target.paths.backup_dir)
     ensure_path_hierarchy_safe(target.paths.state_file)
-    state = load_state(target, agent_names)
+
+    try:
+        state = load_state(target, agent_names)
+    except SystemExit as exc:
+        message = str(exc)
+        state_marker = str(target.paths.state_file)
+        recoverable_prefixes = (
+            "Invalid JSON at ",
+            "Expected JSON object at ",
+            "Missing managed_agents",
+        )
+        if state_marker not in message or not message.startswith(recoverable_prefixes):
+            raise
+
+        print(
+            f"Warning: invalid 480ai install state at {target.paths.state_file}; "
+            "performing best-effort uninstall without config restoration."
+        )
+        print(f"Reason: {exc}")
+
+        removed_agents: list[str] = []
+        kept_agents: list[str] = []
+        for name in agent_names:
+            destination = installed_agent_path(target, name)
+            ensure_not_symlink(destination)
+            if not path_exists(destination):
+                continue
+            current_bytes = read_bytes(destination)
+            expected_bytes = source_agent_path(source_agents_dir, target, name).read_bytes()
+            if current_bytes == expected_bytes:
+                destination.unlink()
+                removed_agents.append(name)
+            else:
+                kept_agents.append(name)
+
+        hook_path = desktop_notification_hook_path(target)
+        ensure_path_hierarchy_safe(hook_path)
+        ensure_not_symlink(hook_path)
+        if hook_path.exists() and hook_path.read_text(encoding="utf-8") == load_desktop_notification_hook_template():
+            hook_path.unlink()
+
+        if target.name == "opencode":
+            plugin_path = opencode_desktop_notification_plugin_path(target)
+            ensure_path_hierarchy_safe(plugin_path)
+            ensure_not_symlink(plugin_path)
+            if plugin_path.exists() and plugin_path.read_text(encoding="utf-8") == render_opencode_desktop_notification_plugin(
+                desktop_notification_hook_path(target)
+            ):
+                plugin_path.unlink()
+
+        if removed_agents:
+            print(f"Removed managed agent files: {', '.join(removed_agents)}")
+        if kept_agents:
+            print(
+                "Kept agent files with unexpected contents (manual cleanup may be required): "
+                + ", ".join(kept_agents)
+            )
+
+        if target.paths.state_file.exists():
+            target.paths.state_file.unlink()
+        if target.paths.installed_agents_dir.exists() and not any(target.paths.installed_agents_dir.iterdir()):
+            target.paths.installed_agents_dir.rmdir()
+        if target.paths.state_dir.exists() and not any(target.paths.state_dir.iterdir()):
+            target.paths.state_dir.rmdir()
+
+        print(f"Uninstalled 480ai {target.label} agents (best-effort).")
+        return
+
+    config = read_target_config(target)
     if migrate_legacy_paths_and_activation(target, state, config):
         write_target_config(target, config)
         write_state(target, state)
@@ -2282,6 +2985,24 @@ def uninstall(target: InstallTarget, source_agents_dir: Path, agent_names: list[
             command=f"{shlex.quote(str(desktop_notification_hook_path(target)))} claude",
         )
         if claude_desktop_changed:
+            write_target_config(target, config)
+    elif target.name == "qwen":
+        qwen_desktop_changed = restore_qwen_desktop_notification_hook(
+            target,
+            state,
+            config,
+            command=f"{shlex.quote(str(desktop_notification_hook_path(target)))} qwen",
+        )
+        if qwen_desktop_changed:
+            write_target_config(target, config)
+    elif target.name == "gemini":
+        gemini_desktop_changed = restore_gemini_desktop_notification_hook(
+            target,
+            state,
+            config,
+            command=f"{shlex.quote(str(desktop_notification_hook_path(target)))} gemini",
+        )
+        if gemini_desktop_changed:
             write_target_config(target, config)
 
     for name in state.get("managed_agents", agent_names):
@@ -2305,9 +3026,19 @@ def uninstall(target: InstallTarget, source_agents_dir: Path, agent_names: list[
 
     activation = target_default_activation_state(target)
     previous_default = validated_previous_default_agent(state)
-    if activation is not None and default_activation_enabled(state):
-        config_key, managed_value = activation
-        if config.get(config_key) in legacy_default_activation_values(target) and previous_default is not None:
+    if default_activation_enabled(state) and previous_default is not None:
+        if activation is not None:
+            config_key, _managed_value = activation
+            legacy_values = legacy_default_activation_values(target)
+        elif target.name == "gemini":
+            # Back-compat: older Gemini installs used default_agent-based activation.
+            config_key = "default_agent"
+            legacy_values = {"480-architect", "ai-architect"}
+        else:
+            config_key = ""
+            legacy_values = set()
+
+        if config_key and legacy_values and config.get(config_key) in legacy_values:
             if previous_default.get("present"):
                 config[config_key] = previous_default.get("value")
             else:
@@ -2316,9 +3047,16 @@ def uninstall(target: InstallTarget, source_agents_dir: Path, agent_names: list[
                 write_target_config(target, config)
 
     restore_codex_subagent_settings(target, state, config)
+    gemini_subagent_changed = restore_gemini_subagent_settings(target, state, config)
+    if gemini_subagent_changed:
+        write_target_config(target, config)
+    restore_gemini_system_prompt_override(target, state, source_agents_dir)
 
     sync_codex_managed_guidance_uninstall(target, state)
     restore_desktop_notification_assets(target, state)
+
+    if maybe_remove_empty_managed_config(target, state, config):
+        config.clear()
 
     write_state(target, state)
 
