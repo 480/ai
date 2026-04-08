@@ -6526,7 +6526,6 @@ manage_agents.install(target="codex", scope="user")
                 "web_fetch",
             ],
             "480-developer": [
-                "agent",
                 "run_shell_command",
                 "read_file",
                 "write_file",
@@ -6536,14 +6535,12 @@ manage_agents.install(target="codex", scope="user")
                 "web_fetch",
             ],
             "480-code-reviewer": [
-                "agent",
                 "read_file",
                 "glob",
                 "grep_search",
                 "run_shell_command",
             ],
             "480-code-reviewer2": [
-                "agent",
                 "read_file",
                 "glob",
                 "grep_search",

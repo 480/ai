@@ -2,7 +2,6 @@
 name: 480-developer
 description: Writes careful and considered code.
 tools:
-  - agent
   - run_shell_command
   - read_file
   - write_file

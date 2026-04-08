@@ -2,7 +2,6 @@
 name: 480-code-reviewer2
 description: Reviews code for best practices and potential issues.
 tools:
-  - agent
   - read_file
   - glob
   - grep_search

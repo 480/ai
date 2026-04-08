@@ -102,7 +102,6 @@
         "qwen": {
           "name": "480-developer",
           "tools": [
-            "agent",
             "run_shell_command",
             "read_file",
             "write_file",
@@ -153,7 +152,6 @@
         "qwen": {
           "name": "480-code-reviewer",
           "tools": [
-            "agent",
             "read_file",
             "glob",
             "grep_search",
@@ -201,7 +199,6 @@
         "qwen": {
           "name": "480-code-reviewer2",
           "tools": [
-            "agent",
             "read_file",
             "glob",
             "grep_search",
