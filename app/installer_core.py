@@ -1761,27 +1761,38 @@ def migrate_qwen_selected_auth_type(target: InstallTarget, config: dict) -> bool
     if target.name != "qwen":
         return False
 
-    selected_auth_type = config.get("selectedAuthType")
-    if isinstance(selected_auth_type, str) and selected_auth_type.strip():
+    # Qwen Code settings migrated auth selection from:
+    # - V1: selectedAuthType (top-level)
+    # - V2+: security.auth.selectedType
+    legacy_selected_auth_type = config.get("selectedAuthType")
+    if not isinstance(legacy_selected_auth_type, str):
         return False
-
-    security = config.get("security")
-    if not isinstance(security, dict):
-        return False
-    auth = security.get("auth")
-    if not isinstance(auth, dict):
-        return False
-    legacy_selected_type = auth.get("selectedType")
-    if not isinstance(legacy_selected_type, str):
-        return False
-
-    normalized = legacy_selected_type.strip()
+    normalized = legacy_selected_auth_type.strip()
     if not normalized:
         return False
 
-    if normalized == "qwen-oauth":
-        normalized = "oauth-personal"
-    config["selectedAuthType"] = normalized
+    supported_auth_types = {"openai", "anthropic", "qwen-oauth", "gemini", "vertex-ai"}
+    if normalized not in supported_auth_types:
+        return False
+
+    security = config.get("security")
+    if security is None:
+        security = {}
+        config["security"] = security
+    if not isinstance(security, dict):
+        return False
+    auth = security.get("auth")
+    if auth is None:
+        auth = {}
+        security["auth"] = auth
+    if not isinstance(auth, dict):
+        return False
+
+    selected_type = auth.get("selectedType")
+    if isinstance(selected_type, str) and selected_type.strip():
+        return False
+
+    auth["selectedType"] = normalized
     return True
 
 

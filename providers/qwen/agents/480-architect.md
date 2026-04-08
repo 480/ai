@@ -2,11 +2,12 @@
 name: 480-architect
 description: Architects whole implementations.
 tools:
+  - agent
   - run_shell_command
   - read_file
   - write_file
-  - edit_file
-  - grep
+  - edit
+  - grep_search
   - glob
   - web_fetch
 ---

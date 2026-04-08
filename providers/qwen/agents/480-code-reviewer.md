@@ -2,9 +2,10 @@
 name: 480-code-reviewer
 description: Reviews code for best practices and potential issues.
 tools:
+  - agent
   - read_file
   - glob
-  - grep
+  - grep_search
   - run_shell_command
 ---
 Qwen Code agent name: 480-code-reviewer maps to role `480-code-reviewer`.

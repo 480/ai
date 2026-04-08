@@ -48,11 +48,12 @@
         "qwen": {
           "name": "480-architect",
           "tools": [
+            "agent",
             "run_shell_command",
             "read_file",
             "write_file",
-            "edit_file",
-            "grep",
+            "edit",
+            "grep_search",
             "glob",
             "web_fetch"
           ]
@@ -101,11 +102,12 @@
         "qwen": {
           "name": "480-developer",
           "tools": [
+            "agent",
             "run_shell_command",
             "read_file",
             "write_file",
-            "edit_file",
-            "grep",
+            "edit",
+            "grep_search",
             "glob",
             "web_fetch"
           ]
@@ -151,9 +153,10 @@
         "qwen": {
           "name": "480-code-reviewer",
           "tools": [
+            "agent",
             "read_file",
             "glob",
-            "grep",
+            "grep_search",
             "run_shell_command"
           ]
         },
@@ -198,9 +201,10 @@
         "qwen": {
           "name": "480-code-reviewer2",
           "tools": [
+            "agent",
             "read_file",
             "glob",
-            "grep",
+            "grep_search",
             "run_shell_command"
           ]
         },
@@ -245,9 +249,11 @@
         "qwen": {
           "name": "480-code-scanner",
           "tools": [
+            "write_file",
+            "edit",
             "read_file",
             "glob",
-            "grep",
+            "grep_search",
             "run_shell_command"
           ]
         },

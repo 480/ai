@@ -3011,7 +3011,7 @@ manage_agents.install(target="codex", scope="user")
             state_path = home / ".qwen" / ".480ai-bootstrap" / "state.json"
             hook_path = home / ".qwen" / ".480ai" / "desktop-notify-hook.py"
             original = {
-                "selectedAuthType": "openai",
+                "security": {"auth": {"selectedType": "openai"}},
                 "hooks": {"Stop": [{"type": "command", "command": "echo existing-stop"}]},
             }
             self.write_json(config_path, original)
@@ -3042,7 +3042,7 @@ manage_agents.install(target="codex", scope="user")
             state_path = home / ".qwen" / ".480ai-bootstrap" / "state.json"
             hook_path = home / ".qwen" / ".480ai" / "desktop-notify-hook.py"
 
-            self.write_json(config_path, {"selectedAuthType": "openai"})
+            self.write_json(config_path, {"security": {"auth": {"selectedType": "openai"}}})
 
             with self.patched_manage_agents_home(home):
                 manage_agents.install(
@@ -3158,7 +3158,7 @@ manage_agents.install(target="codex", scope="user")
             config_path = home / ".qwen" / "settings.json"
             hook_path = home / ".qwen" / ".480ai" / "desktop-notify-hook.py"
             original = {
-                "selectedAuthType": "openai",
+                "security": {"auth": {"selectedType": "openai"}},
                 "hooks": {"Stop": [{"type": "command", "command": "echo existing-stop"}]},
             }
             self.write_json(config_path, original)
@@ -3205,14 +3205,14 @@ manage_agents.install(target="codex", scope="user")
                 result.stderr,
             )
 
-    def test_qwen_install_migrates_legacy_selected_auth_type_to_selected_auth_type(self) -> None:
+    def test_qwen_install_migrates_legacy_selected_auth_type_to_security_auth_selected_type(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp)
             config_path = home / ".qwen" / "settings.json"
             self.write_json(
                 config_path,
                 {
-                    "security": {"auth": {"selectedType": "qwen-oauth"}},
+                    "selectedAuthType": "openai",
                     "theme": "Qwen Dark",
                 },
             )
@@ -3220,11 +3220,10 @@ manage_agents.install(target="codex", scope="user")
             self.run_command(home, "install", "--target", "qwen", "--scope", "user", "--no-activate-default")
 
             installed = self.read_json(config_path)
-            self.assertEqual(installed["selectedAuthType"], "oauth-personal")
-            self.assertEqual(installed["security"]["auth"]["selectedType"], "qwen-oauth")
+            self.assertEqual(installed["security"]["auth"]["selectedType"], "openai")
             self.assertEqual(installed["theme"], "Qwen Dark")
 
-    def test_qwen_install_preserves_existing_selected_auth_type(self) -> None:
+    def test_qwen_install_preserves_existing_security_auth_selected_type(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp)
             config_path = home / ".qwen" / "settings.json"
@@ -3239,7 +3238,7 @@ manage_agents.install(target="codex", scope="user")
             self.run_command(home, "install", "--target", "qwen", "--scope", "user", "--no-activate-default")
 
             installed = self.read_json(config_path)
-            self.assertEqual(installed["selectedAuthType"], "openai")
+            self.assertEqual(installed["security"]["auth"]["selectedType"], "qwen-oauth")
 
     def test_codex_user_install_updates_existing_dotted_subagent_settings_in_place(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -6517,39 +6516,45 @@ manage_agents.install(target="codex", scope="user")
     def test_qwen_agent_frontmatter_keeps_required_tools_declarations(self) -> None:
         expected_tools_by_agent = {
             "480-architect": [
+                "agent",
                 "run_shell_command",
                 "read_file",
                 "write_file",
-                "edit_file",
-                "grep",
+                "edit",
+                "grep_search",
                 "glob",
                 "web_fetch",
             ],
             "480-developer": [
+                "agent",
                 "run_shell_command",
                 "read_file",
                 "write_file",
-                "edit_file",
-                "grep",
+                "edit",
+                "grep_search",
                 "glob",
                 "web_fetch",
             ],
             "480-code-reviewer": [
+                "agent",
                 "read_file",
                 "glob",
-                "grep",
+                "grep_search",
                 "run_shell_command",
             ],
             "480-code-reviewer2": [
+                "agent",
                 "read_file",
                 "glob",
-                "grep",
+                "grep_search",
                 "run_shell_command",
             ],
             "480-code-scanner": [
+                "write_file",
+                "edit",
                 "read_file",
                 "glob",
-                "grep",
+                "grep_search",
                 "run_shell_command",
             ],
         }
