@@ -42,7 +42,7 @@
         },
         "codex": {
           "name": "480",
-          "instruction_source": "providers/codex/instructions/480-architect.md",
+          "instruction_source": "providers/codex/instructions/480-orchestrator.md",
           "sandbox_mode": "workspace-write"
         },
         "qwen": {
@@ -61,6 +61,26 @@
         "gemini": {
           "name": "480-architect",
           "tool_name": "_480-architect"
+        }
+      }
+    },
+    {
+      "id": "480-design-architect",
+      "display_name": "480-design-architect",
+      "description": "Produces design contracts and minimal transfer analyses.",
+      "role": "design-only analysis for Codex behavior boundaries",
+      "mode": "subagent",
+      "model": "openai/gpt-5.4",
+      "reasoning": "xhigh",
+      "instruction_source": "providers/codex/instructions/480-design-architect.md",
+      "targets": [
+        "codex"
+      ],
+      "target_metadata": {
+        "codex": {
+          "name": "480-design-architect",
+          "instruction_source": "providers/codex/instructions/480-design-architect.md",
+          "sandbox_mode": "read-only"
         }
       }
     },
