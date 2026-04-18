@@ -358,6 +358,8 @@ class InstallationTests(unittest.TestCase):
 
     def assert_scanner_output_path_contract(self, text: str) -> None:
         self.assertIn("`docs/480ai/ARCHITECTURE.md`", text)
+        self.assertIn("If that file is missing during a scan, create it", text)
+        self.assertIn("Create the file when it is missing", text)
         self.assertNotIn("called ARCHITECTURE.md at the root of the repo", text)
         self.assertRegex(text, r"Do not modify any files except .*docs/480ai/ARCHITECTURE\.md")
         self.assertIn("The user's time is expensive.", text)
@@ -366,6 +368,15 @@ class InstallationTests(unittest.TestCase):
             "Absorb small uncertainties with evidence-based judgments and explicit assumptions when that is sufficient.",
             text,
         )
+        self.assertIn("Treat `docs/480ai/ARCHITECTURE.md` as a 480ai working artifact", text)
+        self.assertIn("capability boundaries such as read vs write paths, orchestration vs serving paths", text)
+        self.assertIn("source-of-truth ownership", text)
+        self.assertIn("configuration ownership", text)
+        self.assertIn("abstraction consumers", text)
+        self.assertIn("If an abstraction appears to combine multiple capabilities", text)
+        self.assertIn("Document risks and open questions with evidence.", text)
+        self.assertIn("Do not add framework-specific recommendations or implementation prescriptions.", text)
+        self.assertNotIn("Spring bean", text)
 
     def assert_developer_role_identity_contract(self, text: str, *, codex_style: bool) -> None:
         if codex_style:
@@ -6532,6 +6543,10 @@ manage_agents.install(target="codex", scope="user")
         self.assertIn("Any explicit change request from either reviewer is a real review finding and is never waived by this fallback.", codex_managed_guidance)
         self.assertIn("Decision Closure Gate", codex_architect)
         self.assertIn("Decision Closure Gate", codex_managed_guidance)
+        self.assertIn("include relevant scanner findings and `docs/480ai/ARCHITECTURE.md` constraints", codex_architect)
+        self.assertIn("include relevant scanner findings and `docs/480ai/ARCHITECTURE.md` constraints", codex_managed_guidance)
+        self.assertIn("spawn `480-code-scanner` before the design handoff", codex_architect)
+        self.assertIn("spawn `480-code-scanner` before the design handoff", codex_managed_guidance)
         self.assertIn("Track `Source Open Items`", codex_managed_guidance)
         self.assertIn("minimum safe behavior", codex_managed_guidance)
         self.assertIn("Decision Closure Summary", codex_managed_guidance)
@@ -6647,6 +6662,14 @@ manage_agents.install(target="codex", scope="user")
             "`Open Decisions` may say `None.` only after all implementation-critical decisions have explicit closure evidence.",
             design_instructions,
         )
+        self.assertIn("Repository architecture context", design_instructions)
+        self.assertIn("read `docs/480ai/ARCHITECTURE.md` when it exists", design_instructions)
+        self.assertIn("parent-provided scanner findings as design context", design_instructions)
+        self.assertIn("Preserve capability boundaries in every Design Contract and MTA", design_instructions)
+        self.assertIn("A read-only capability must not be treated as satisfying a write, publish, mutate, or ownership-transfer capability", design_instructions)
+        self.assertIn("Configuration semantics must be capability-specific", design_instructions)
+        self.assertIn("return `BLOCKED` unless the parent has provided explicit closure evidence", design_instructions)
+        self.assertNotIn("Spring bean", design_instructions)
 
         codex_reviewer = tomllib.loads((provider_agents_source_dir("codex") / "480-code-reviewer.toml").read_text(encoding="utf-8"))
         self.assert_codex_close_contract(

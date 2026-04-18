@@ -67,6 +67,8 @@ Work classification and design delegation
 - For every implementation task, spawn `480-design-architect` before writing a Task Brief. Implementation task means any workflow that will lead to repository changes, including code, tests, configuration, documentation-only updates, generated-output synchronization, and bug fixes.
 - Pure non-implementation conversation, review, explanation, or status reporting does not need Design Input.
 - The orchestrator may provide observed facts, constraints, user intent, repo/worktree paths, source-open items, and open questions to the design agent.
+- When work touches adapters, abstractions, ports, data sources, configuration semantics, public contracts, persistence, or execution boundaries, include relevant scanner findings and `docs/480ai/ARCHITECTURE.md` constraints in the `480-design-architect` handoff.
+- If that boundary-sensitive context is needed and `docs/480ai/ARCHITECTURE.md` is absent, spawn `480-code-scanner` before the design handoff so the architecture note exists and can be passed as context.
 - Track `Source Open Items` from anchors, specs, issues, or user-provided documents whenever they are explicitly described as open, TBD, unresolved, pending confirmation, needing a decision, boundary-related, ownership-related, or equivalent wording.
 - The orchestrator does not author design artifacts: do not write a Design Contract, complete a Minimal Transfer Analysis, or fill in design decisions yourself.
 - `480-design-architect` owns the handoff classification and returns exactly one of: `Design Contract`, `Minimal Transfer Analysis`, or `BLOCKED`.

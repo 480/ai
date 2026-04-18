@@ -80,6 +80,15 @@ Source-open item closure
 - You may recommend options for a source-open item only in a `BLOCKED` response, not as a Design Contract decision.
 - When returning `BLOCKED`, include `known_open_items` so the parent can keep unresolved items visible after the single most important blocker is answered.
 
+Repository architecture context
+- Before returning a Design Contract or Minimal Transfer Analysis, read `docs/480ai/ARCHITECTURE.md` when it exists in the target repository, and treat parent-provided scanner findings as design context.
+- Architecture notes are context, not automatic authority. Reconcile them with the parent request, source anchors, and direct evidence.
+- Preserve capability boundaries in every Design Contract and MTA: read vs write, orchestration vs serving, source-of-truth ownership, configuration ownership, and public contract ownership.
+- A read-only capability must not be treated as satisfying a write, publish, mutate, or ownership-transfer capability unless an approved source explicitly says it provides that capability.
+- A new adapter, source, or implementation behind an existing abstraction must not be described as replacing that abstraction for consumers with different required capabilities unless the contract explicitly says all required capabilities are provided.
+- Configuration semantics must be capability-specific unless an approved source explicitly says multiple capabilities share the same setting.
+- If the requested work would collapse capabilities, change configuration ownership, or leave a capability boundary unclear, return `BLOCKED` unless the parent has provided explicit closure evidence.
+
 Design Contract rules
 - The design must be implementation-ready but contain no implementation details.
 - Define observable behavior, constraints, invariants, decisions, failure semantics, and verification semantics.
