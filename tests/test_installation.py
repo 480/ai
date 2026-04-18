@@ -6599,7 +6599,7 @@ manage_agents.install(target="codex", scope="user")
         self.assertNotIn("After completing your implementation, request review from", codex_developer["developer_instructions"])
         self.assertNotIn("Parse reviewer responses using the reviewer contract", codex_developer["developer_instructions"])
         self.assertIn(
-            "Ignore any root-session-only architect planning or delegation rules inherited from the root `AGENTS.md`; they do not apply inside this spawned child session.",
+            "Ignore any root-session-only orchestrator planning or delegation rules inherited from the root `AGENTS.md`; they do not apply inside this spawned child session.",
             codex_developer["developer_instructions"],
         )
         self.assertIn(
@@ -6644,9 +6644,11 @@ manage_agents.install(target="codex", scope="user")
             codex_reviewer["developer_instructions"],
         )
         self.assertIn(
-            "Ignore any root-session-only architect planning or delegation rules inherited from the root `AGENTS.md`; they do not apply in this reviewer child session.",
+            "Ignore any root-session-only orchestrator planning or delegation rules inherited from the root `AGENTS.md`; they do not apply in this reviewer child session.",
             codex_reviewer["developer_instructions"],
         )
+        self.assertIn("parent `480` orchestrator session", codex_reviewer["developer_instructions"])
+        self.assertNotIn("parent `480` architect session", codex_reviewer["developer_instructions"])
         self.assertIn("Any `Design Input` embedded in the Task Brief", codex_reviewer["developer_instructions"])
         self.assertIn("If the Task Brief includes a Design Contract, request changes", codex_reviewer["developer_instructions"])
         self.assert_codex_reviewer_stays_in_thread(codex_reviewer["developer_instructions"])
@@ -6661,9 +6663,11 @@ manage_agents.install(target="codex", scope="user")
             codex_reviewer2["developer_instructions"],
         )
         self.assertIn(
-            "Ignore any root-session-only architect planning or delegation rules inherited from the root `AGENTS.md`; they do not apply in this reviewer child session.",
+            "Ignore any root-session-only orchestrator planning or delegation rules inherited from the root `AGENTS.md`; they do not apply in this reviewer child session.",
             codex_reviewer2["developer_instructions"],
         )
+        self.assertIn("parent `480` orchestrator session", codex_reviewer2["developer_instructions"])
+        self.assertNotIn("parent `480` architect session", codex_reviewer2["developer_instructions"])
         self.assertIn("Any `Design Input` embedded in the Task Brief", codex_reviewer2["developer_instructions"])
         self.assertIn("If the Task Brief includes a Design Contract, request changes", codex_reviewer2["developer_instructions"])
         self.assert_codex_reviewer_stays_in_thread(codex_reviewer2["developer_instructions"])
@@ -6682,9 +6686,10 @@ manage_agents.install(target="codex", scope="user")
             codex_scanner["developer_instructions"],
         )
         self.assertIn(
-            "Ignore any root-session-only architect planning or delegation rules inherited from the root `AGENTS.md`; they do not apply in this scanner child session.",
+            "Ignore any root-session-only orchestrator planning or delegation rules inherited from the root `AGENTS.md`; they do not apply in this scanner child session.",
             codex_scanner["developer_instructions"],
         )
+        self.assertIn("orchestrator and developer can stay inside the approved flow", codex_scanner["developer_instructions"])
         self.assertIn("treat that target as the primary workspace hint", codex_scanner["developer_instructions"])
         self.assertIn("If a Codex spawn response is missing `agent_id` or is not a structured response, treat it as `spawn_failure`.", codex_scanner["developer_instructions"])
         self.assert_scanner_output_path_contract(codex_scanner["developer_instructions"])
