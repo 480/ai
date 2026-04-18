@@ -71,6 +71,12 @@ CODEX_CANONICAL_AGENTS = [
     "480-code-reviewer2",
     "480-code-scanner",
 ]
+OLD_CODEX_AGENTS = [
+    "480-developer",
+    "480-code-reviewer",
+    "480-code-reviewer2",
+    "480-code-scanner",
+]
 CODEX_AGENTS = [
     "480-design-architect",
     "480-developer",
@@ -1590,6 +1596,109 @@ manage_agents.install(target="codex", scope="user")
             self.assertIn(original_guidance, reinstalled_guidance)
             self.assertEqual(reinstalled_guidance.count(installer_core.CODEX_MANAGED_AGENTS_START), 1)
             self.assertEqual(reinstalled_guidance.count(installer_core.CODEX_MANAGED_AGENTS_END), 1)
+
+    def test_codex_user_install_migrates_pre_design_architect_state(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            target = resolve_install_target("codex", "user", home=home)
+            config_path = home / ".codex" / "config.toml"
+            guidance_path = home / ".codex" / "AGENTS.md"
+            state_path = home / ".codex" / ".480ai-bootstrap" / "state.json"
+            config_path.parent.mkdir(parents=True, exist_ok=True)
+            config_path.write_text('model = "gpt-5.4"\n', encoding="utf-8")
+            guidance_path.write_text("keep user guidance\n", encoding="utf-8")
+            self.write_json(
+                state_path,
+                {
+                    "version": 1,
+                    "managed_agents": list(OLD_CODEX_AGENTS),
+                    "backups": {},
+                    "managed": {name: True for name in OLD_CODEX_AGENTS},
+                    "managed_file_metadata": {name: None for name in OLD_CODEX_AGENTS},
+                    "pending_cleanup": {name: False for name in OLD_CODEX_AGENTS},
+                },
+            )
+
+            migrated_state = installer_core.load_state(target, CODEX_AGENTS)
+            self.assertEqual(migrated_state["managed_agents"], CODEX_AGENTS)
+            self.assertFalse(migrated_state["managed"]["480-design-architect"])
+            self.assertIsNone(migrated_state["managed_file_metadata"]["480-design-architect"])
+            self.assertFalse(migrated_state["pending_cleanup"]["480-design-architect"])
+
+            with self.patched_manage_agents_home(home), mock.patch(
+                "app.installer_core.cleanup_invalid_install_backups"
+            ) as cleanup_invalid_backups:
+                installer_core.install(
+                    target,
+                    provider_agents_source_dir("codex"),
+                    CODEX_AGENTS,
+                    codex_managed_guidance=render_agents.render_codex_managed_guidance(agent_bundle.load_bundle()),
+                )
+
+            cleanup_invalid_backups.assert_not_called()
+            state = self.read_json(state_path)
+            self.assertEqual(state["managed_agents"], CODEX_AGENTS)
+            self.assertTrue(state["managed"]["480-design-architect"])
+            self.assertIsNotNone(state["managed_file_metadata"]["480-design-architect"])
+            self.assertFalse(state["pending_cleanup"]["480-design-architect"])
+            self.assertIn("keep user guidance\n", guidance_path.read_text(encoding="utf-8"))
+            parsed_config = tomllib.loads(config_path.read_text(encoding="utf-8"))
+            self.assertEqual(parsed_config["model"], "gpt-5.4")
+            self.assertTrue(parsed_config["features"]["multi_agent"])
+            self.assertEqual(parsed_config["agents"]["max_depth"], 1)
+
+    def test_codex_user_uninstall_migrates_pre_design_architect_state(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            state_path = home / ".codex" / ".480ai-bootstrap" / "state.json"
+            agents_dir = home / ".codex" / "agents"
+            self.write_json(
+                state_path,
+                {
+                    "version": 1,
+                    "managed_agents": list(OLD_CODEX_AGENTS),
+                    "backups": {},
+                    "managed": {name: True for name in OLD_CODEX_AGENTS},
+                    "managed_file_metadata": {name: None for name in OLD_CODEX_AGENTS},
+                    "pending_cleanup": {name: False for name in OLD_CODEX_AGENTS},
+                },
+            )
+            agents_dir.mkdir(parents=True, exist_ok=True)
+            for name in OLD_CODEX_AGENTS:
+                source = provider_agents_source_dir("codex") / f"{name}.toml"
+                (agents_dir / f"{name}.toml").write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
+
+            result = self.run_command_capture(home, "uninstall", "--target", "codex", "--scope", "user")
+
+            self.assertEqual(result.returncode, 0)
+            self.assertNotIn("best-effort", result.stdout)
+            self.assertNotIn("invalid 480ai install state", result.stdout)
+            self.assertFalse(state_path.exists())
+            for name in OLD_CODEX_AGENTS:
+                self.assertFalse((agents_dir / f"{name}.toml").exists())
+
+    def test_codex_uninstall_rejects_non_exact_sparse_managed_agent_state(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            state_path = home / ".codex" / ".480ai-bootstrap" / "state.json"
+            sparse_agents = OLD_CODEX_AGENTS[:-1]
+            self.write_json(
+                state_path,
+                {
+                    "version": 1,
+                    "managed_agents": sparse_agents,
+                    "backups": {},
+                    "managed": {name: True for name in sparse_agents},
+                    "managed_file_metadata": {name: None for name in sparse_agents},
+                    "pending_cleanup": {name: False for name in sparse_agents},
+                },
+            )
+
+            result = self.run_command_capture(home, "uninstall", "--target", "codex", "--scope", "user")
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Invalid managed_agents", result.stderr)
+            self.assertTrue(state_path.exists())
 
     def test_codex_user_install_cleans_legacy_architect_agent_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
