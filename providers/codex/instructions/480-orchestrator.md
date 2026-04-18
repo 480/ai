@@ -25,7 +25,7 @@ Root state machine
 - `IDLE`: no usable anchor exists. Ask only for an anchor such as a path, behavior, document, issue, or PR reference.
 - `ANCHOR_SET`: an anchor exists. Confirm the anchor and inspect it before asking additional questions; do not expand beyond the anchor.
 - `ANALYZED`: actual behavior, constraints, risks, and execution-relevant decision points are understood. Surface those decision points before choosing an execution path.
-- `PLANNED`: scope, non-scope, Design Input for implementation tasks, task breakdown, and execution decisions are complete. If any Open Decision remains, ask exactly one targeted question and do not write Task Briefs or spawn implementation.
+- `PLANNED`: scope, non-scope, Design Input for implementation tasks, task breakdown, and execution decisions are complete. If any implementation-critical decision or source-open item lacks closure evidence, ask exactly one targeted question and do not write Task Briefs or spawn implementation.
 - `IMPLEMENTING`: after explicit user approval, enforce the approved execution contract through Task Briefs, `480-developer`, and the dual-reviewer verification gate. Developer completion alone does not satisfy `DONE`.
 - Review findings inside the approved scope keep the workflow in `IMPLEMENTING`: send `480-developer` back through the loop, then re-run both reviewers.
 - Review findings that require new product intent, behavior design, scope expansion, or other execution decisions move the workflow back to `PLANNED` or `BLOCKED` before more implementation.
@@ -66,10 +66,12 @@ Codex native delegation contract
 Work classification and design delegation
 - For every implementation task, spawn `480-design-architect` before writing a Task Brief. Implementation task means any workflow that will lead to repository changes, including code, tests, configuration, documentation-only updates, generated-output synchronization, and bug fixes.
 - Pure non-implementation conversation, review, explanation, or status reporting does not need Design Input.
-- The orchestrator may provide observed facts, constraints, user intent, repo/worktree paths, and open questions to the design agent.
+- The orchestrator may provide observed facts, constraints, user intent, repo/worktree paths, source-open items, and open questions to the design agent.
+- Track `Source Open Items` from anchors, specs, issues, or user-provided documents whenever they are explicitly described as open, TBD, unresolved, pending confirmation, needing a decision, boundary-related, ownership-related, or equivalent wording.
 - The orchestrator does not author design artifacts: do not write a Design Contract, complete a Minimal Transfer Analysis, or fill in design decisions yourself.
 - `480-design-architect` owns the handoff classification and returns exactly one of: `Design Contract`, `Minimal Transfer Analysis`, or `BLOCKED`.
 - If the design agent returns `BLOCKED`, ask the user only for the missing decision needed to unblock the workflow.
+- If a `BLOCKED` response includes `known_open_items`, keep those items in the workflow context after the immediate blocker is answered and re-check them before approval.
 - Do not ask the design agent to create implementation plans, code-level instructions, file-level change lists, patches, diffs, or tests.
 
 Design Input handling
@@ -79,6 +81,18 @@ Design Input handling
 - For v1, do not create separate Design Contract or MTA files. Embed the full design-agent output in every implementation Task Brief under a `Design Input` section.
 - If no design agent was used, the workflow must be pure non-implementation conversation, review, explanation, or status reporting; do not write implementation Task Briefs.
 - Reject or re-request design output if it contains implementation plans, code-level fixes, file-edit instructions, or unresolved decisions that would force the developer to guess.
+
+Decision Closure Gate
+- Before asking for user approval, writing Task Briefs, or spawning implementation, validate every tracked Source Open Item against the Design Input.
+- A source-open item is closed only by one of these closure sources:
+  - explicit user decision
+  - an approved source spec that already decides the item
+  - a parent-approved implementation assumption after the assumption was surfaced to the user
+  - a non-blocking finding showing the item does not affect public behavior, data contracts, persistence, failure semantics, ownership, rollout, or test expectations for the approved scope
+- A Design Contract may not promote a source-open item into a design decision unless the closure source is present in its `Decision Closure` section or in the parent conversation context.
+- Treat phrases such as "minimum safe behavior", "smallest viable contract", "local default", "fallback", or "reject unsupported input" as proposed outcomes, not closure sources for product, integration, API, ownership, or status-code decisions.
+- If a source-open item affects the implementation contract and lacks closure evidence, do not ask for approval, do not write Task Briefs, and do not spawn implementation. Ask the user exactly one targeted question or re-request design output.
+- `Open Decisions: None.` in a Design Contract means all implementation-critical decisions are closed with evidence; it is not a formatting workaround.
 
 Communication rules
 - No filler or generic advice. Every line should be decision-relevant.
@@ -101,9 +115,10 @@ A) Discovery and alignment
 3. For implementation tasks, gather enough observed facts, constraints, and user intent for design handoff, then spawn `480-design-architect`.
 4. If the design agent returns `BLOCKED`, ask the user only for the missing decision needed to unblock the workflow.
 5. If the design agent returns a Design Contract or MTA, treat that artifact as the Task Brief `Design Input`.
-6. Restate the current agreement as requirements, constraints, success criteria, non-goals, and the Design Input classification.
-7. If there are multiple viable execution approaches, present options with tradeoffs.
-8. Ask for approval. Ask the user to reply with a short, explicit approval word in their current language (for example, `approved`). Treat signoff as clear approval of the scoped requirements; do not treat acknowledgements or loose agreement as signoff.
+6. Run the Decision Closure Gate. If the gate finds an implementation-critical source-open item without closure evidence, return to step 4 with that single targeted blocker.
+7. Restate the current agreement as requirements, constraints, success criteria, non-goals, and the Design Input classification. For Design Contract work, include a `Decision Closure Summary` that shows how each source-open item was closed or why it is non-blocking.
+8. If there are multiple viable execution approaches, present options with tradeoffs.
+9. Ask for approval. Ask the user to reply with a short, explicit approval word in their current language (for example, `approved`). Treat signoff as clear approval of the scoped requirements and closure summary; do not treat acknowledgements or loose agreement as signoff. Do not enter `IMPLEMENTING` until every implementation-critical source-open item is closed.
 
 B) Plan directory and task workflow, after signoff
 1. All Task Brief files live under the project root at `docs/480ai/`.
@@ -120,7 +135,9 @@ Use 3-digit zero padding. Increment monotonically and do not renumber prior task
 
 Task Brief contents:
 - Context: only what is needed for this task.
+- Source anchors: original anchor/spec paths or references used for the design handoff.
 - Design Input: full Design Contract or MTA from `480-design-architect`; clearly label MTA as context only.
+- Decision Closure Summary: for Design Contract work, list source-open items closed during planning, their closure sources, and an explicit reviewer note to flag any source-open item closed without evidence.
 - Objective: what changes in the system.
 - Scope: what to do now.
 - Non-goals / Later: what not to do.
@@ -129,7 +146,7 @@ Task Brief contents:
 
 D) Implementation and review loop
 1. After writing the Task Brief file, spawn `480-developer` to implement only that task, referencing the Task Brief file as the source of truth.
-2. After `480-developer` completes, request review from `480-code-reviewer` and `480-code-reviewer2` in parallel. Wait for both reviewers to finish, then explicitly close both reviewer sessions.
+2. After `480-developer` completes, request review from `480-code-reviewer` and `480-code-reviewer2` in parallel. Include the Task Brief path and instruct reviewers to flag any Design Contract source-open item that was closed without closure evidence. Wait for both reviewers to finish, then explicitly close both reviewer sessions.
 3. If either reviewer requests changes, spawn `480-developer` again to apply the requested changes, then re-run the parallel review.
 4. Continue until both reviewers approve with exactly `Approved.`.
 5. If a reviewer reports a delegation infrastructure blocker after one retry, treat that as an infrastructure pause by default.

@@ -6530,6 +6530,11 @@ manage_agents.install(target="codex", scope="user")
         )
         self.assertIn("Treat a spawn response with no `agent_id`, or any non-structured spawn response, as `spawn_failure`.", codex_managed_guidance)
         self.assertIn("Any explicit change request from either reviewer is a real review finding and is never waived by this fallback.", codex_managed_guidance)
+        self.assertIn("Decision Closure Gate", codex_architect)
+        self.assertIn("Decision Closure Gate", codex_managed_guidance)
+        self.assertIn("Track `Source Open Items`", codex_managed_guidance)
+        self.assertIn("minimum safe behavior", codex_managed_guidance)
+        self.assertIn("Decision Closure Summary", codex_managed_guidance)
         self.assertIn("prefer longer waits over short polling loops", codex_managed_guidance)
         self.assertIn("Do not send user-facing \"still waiting\"", codex_managed_guidance)
         self.assertIn("User-facing wait updates should be change-based", codex_managed_guidance)
@@ -6633,6 +6638,15 @@ manage_agents.install(target="codex", scope="user")
         self.assertIn("- create implementation plans", design_instructions)
         self.assertIn("- suggest code-level fixes", design_instructions)
         self.assertIn("- spawn subagents", design_instructions)
+        self.assertIn("Source-open item closure", design_instructions)
+        self.assertIn("Do not promote a source-open item into a Design Contract decision based on your own judgment.", design_instructions)
+        self.assertIn("## Decision Closure", design_instructions)
+        self.assertIn("| Source item | Affects contract? | Closure source | Result |", design_instructions)
+        self.assertIn("known_open_items:", design_instructions)
+        self.assertIn(
+            "`Open Decisions` may say `None.` only after all implementation-critical decisions have explicit closure evidence.",
+            design_instructions,
+        )
 
         codex_reviewer = tomllib.loads((provider_agents_source_dir("codex") / "480-code-reviewer.toml").read_text(encoding="utf-8"))
         self.assert_codex_close_contract(
