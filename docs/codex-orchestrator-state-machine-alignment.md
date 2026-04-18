@@ -2,7 +2,7 @@
 
 ## Context
 
-Codex now uses a root Software Orchestrator plus conditional subagents for design, implementation, review, and scanning. The root orchestrator does not implement code directly. It classifies work, gathers approval, writes Task Briefs, delegates implementation to `480-developer`, and runs the dual-reviewer loop with `480-code-reviewer` and `480-code-reviewer2`.
+Codex now uses a root Software Orchestrator plus dedicated subagents for design handoff, implementation, review, and scanning. The root orchestrator does not implement code directly. It classifies work, gathers approval, writes Task Briefs, delegates implementation to `480-developer`, and runs the dual-reviewer loop with `480-code-reviewer` and `480-code-reviewer2`.
 
 A separate local state-machine reference described a general Codex lifecycle:
 
@@ -58,7 +58,7 @@ The root orchestrator interprets the states as action constraints:
 - `IDLE`: no usable anchor exists; ask only for an anchor.
 - `ANCHOR_SET`: an anchor exists; inspect it before asking additional questions.
 - `ANALYZED`: actual behavior, constraints, risks, and execution-relevant decision points are understood.
-- `PLANNED`: scope, non-scope, design input when needed, task breakdown, and execution decisions are complete.
+- `PLANNED`: scope, non-scope, Design Input for implementation tasks, task breakdown, and execution decisions are complete.
 - `IMPLEMENTING`: after explicit approval, enforce the approved execution contract through Task Briefs, developer execution, and dual-reviewer verification.
 - `DONE`: implementation and review are complete, child lifecycle work is closed, and no follow-up remains.
 - `BLOCKED`: exactly one missing decision, contract violation, or unresolved infrastructure blocker prevents progress.
@@ -71,13 +71,12 @@ Reviewer infrastructure blockers follow the existing retry and low-risk fallback
 
 This change does not:
 
-- change `480-developer`
+- change non-Codex `480-developer` behavior
 - change reviewer prompts
 - add a new runtime dependency on local user files
 - add a separate checked-in state-machine source file
 - make reviewer subagents first-class states
 - change non-Codex provider behavior
-- change the conditional `480-design-architect` workflow
 
 ## Validation
 

@@ -17,7 +17,7 @@ The operating priorities remain:
 The Codex-only `480-developer` prompt now includes a compact implementation-agent contract and two execution modes:
 
 - Mode A: contract-driven implementation
-- Mode B: direct maintenance implementation
+- Mode B: MTA-backed maintenance implementation
 
 This is a partial alignment only. The checked-in prompt does not depend on local user files such as `~/.codex/AGENTS.md` or `~/.codex/STATE-MACHINE.md`, and it does not introduce separate design-contract files or implementation-plan artifacts.
 
@@ -25,18 +25,19 @@ This is a partial alignment only. The checked-in prompt does not depend on local
 
 `480-developer` now treats behavior authority as explicit:
 
+- Normal Codex implementation Task Briefs are expected to include Design Input from `480-design-architect`.
 - Behavior-changing work requires a Design Contract in Task Brief `Design Input`.
-- Without a Design Contract, the developer may only perform semantics-preserving maintenance.
+- MTA-backed work may implement maintenance that preserves or restores already-defined behavior, including bug fixes.
 - The developer must not silently introduce behavior, expand scope, change policy, or change invariants.
-- If behavior authority, execution mode, or an implementation-critical decision is unclear, the developer returns `BLOCKED` to the parent `480` session with one targeted blocker before coding.
+- If Design Input is missing, behavior authority is unclear, execution mode is unclear, or an implementation-critical decision is unclear, the developer returns `BLOCKED` to the parent `480` session with one targeted blocker before coding.
 
 ## Execution Modes
 
 Mode A applies only when the Task Brief includes a Design Contract in `Design Input`. In that mode, the developer implements behavior only within the contract.
 
-Mode B applies when there is no Design Contract and the work is local, minimal, and semantics-preserving. Examples include failing tests, compile errors, wiring fixes, assertion corrections, and minimal defect remediation.
+Mode B applies only when the Task Brief includes Minimal Transfer Analysis in `Design Input` and the work is local, minimal, and preserves or restores already-defined behavior. Examples include failing tests, compile errors, wiring fixes, assertion corrections, documentation-only updates, generated-output synchronization, and minimal defect remediation.
 
-If satisfying a requested expected behavior would require behavior-changing work, the developer must stop and request a Design Contract instead of inferring new behavior.
+If the Task Brief lacks Design Input, or if satisfying a requested expected behavior would require behavior-changing work, the developer must stop and request parent correction instead of inferring new behavior.
 
 ## MTA Handling
 
@@ -61,8 +62,6 @@ This keeps MTA useful for context transfer while preventing it from bypassing th
 
 This change does not:
 
-- change the root orchestrator prompt
-- change reviewer, scanner, or design-architect prompts
 - change non-Codex provider prompts
 - add a runtime dependency on local user files
 - introduce separate Design Contract or implementation-plan artifacts
@@ -75,7 +74,8 @@ The implementation is covered by installation and rendering tests that verify:
 - Codex rendered `480-developer` instructions include the implementation-agent contract.
 - Mode A and Mode B semantics are present.
 - Behavior-changing work requires a Design Contract.
-- No Design Contract means semantics-preserving maintenance only.
+- MTA-backed work is limited to maintenance that preserves or restores already-defined behavior.
+- Missing Design Input returns `BLOCKED`.
 - MTA cannot authorize new behavior, policy changes, invariant changes, or scope expansion.
 - Unclear behavior authority returns `BLOCKED`.
 - Non-Codex developer prompts do not gain Codex-only implementation-agent wording.

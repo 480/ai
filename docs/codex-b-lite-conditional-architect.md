@@ -1,4 +1,4 @@
-# Codex B-lite Conditional Architect Decision
+# Codex B-lite Design Handoff Decision
 
 ## Context
 
@@ -10,11 +10,13 @@ The desired operating priorities remain:
 2. Correctness.
 3. Performance only when there is clear evidence it is needed.
 
-The discussion concluded that a full split between orchestration and architecture can raise the correctness ceiling, but applying that split unconditionally would be overengineering. The right shape is a conditional B-lite model for Codex only.
+The discussion concluded that a full split between orchestration and architecture can raise the correctness ceiling, but mandatory full design for every small change would be overengineering. The right shape is a B-lite model for Codex only: the root orchestrates, and a design-only subagent classifies every implementation handoff before Task Brief authoring.
+
+The conditional boundary is the output artifact, not whether the root calls the design subagent for implementation work. A Design Contract remains conditional on behavior-changing work. Minimal Transfer Analysis exists so non-design maintenance can transfer context without forcing the root orchestrator to make semantic classification or behavior-design decisions itself.
 
 ## Decision
 
-Codex now uses a root Software Orchestrator plus a conditional design-only subagent:
+Codex now uses a root Software Orchestrator plus a design-only handoff subagent:
 
 - The root Codex session remains identified by the existing primary role id `480-architect`.
 - For Codex only, that primary role id now uses `providers/codex/instructions/480-orchestrator.md` as its instruction source.
@@ -43,9 +45,15 @@ It is registered as a Codex-only subagent in `bundles/common/agents.json` with:
 
 The target filtering layer ensures it appears in Codex rendered and installed outputs, but not in OpenCode, Claude, Qwen, or Gemini outputs.
 
-## Conditional Design Path
+## Design Handoff Path
 
-The root Software Orchestrator calls `480-design-architect` only when the task crosses a semantic boundary, including:
+The root Software Orchestrator calls `480-design-architect` for every implementation task before writing a Task Brief. Implementation tasks include code, tests, configuration, docs-only updates, generated-output synchronization, and bug fixes.
+
+Pure non-implementation conversation, review, explanation, or status reporting does not need Design Input.
+
+The orchestrator may pass observed facts, constraints, user intent, repository paths, and open questions to `480-design-architect`, but it does not author design artifacts or fill in design decisions itself.
+
+`480-design-architect` returns a Design Contract when the task crosses a semantic boundary, including:
 
 - new functionality
 - policy or invariant changes
@@ -55,9 +63,24 @@ The root Software Orchestrator calls `480-design-architect` only when the task c
 - configuration semantics changes
 - architecture changes
 
-The root skips design delegation for maintenance work, including bug fixes, failing tests, compile errors, wiring fixes, assertion corrections, documentation-only updates, generated-output synchronization, and minimal defect remediation.
+`480-design-architect` returns Minimal Transfer Analysis only for context-preserving maintenance that restores already-defined behavior without new policy, invariant, state transition, public API/data contract/schema, configuration semantics, or architecture changes. Bug fixes are eligible for MTA only when they are non-design maintenance; otherwise the design subagent returns a Design Contract or `BLOCKED`.
 
 If the design subagent returns `BLOCKED`, the root asks only for the missing decision needed to unblock the workflow.
+
+## Why This Remains B-lite
+
+The mandatory step is handoff classification, not mandatory behavior design.
+
+Without MTA, maintenance work would still need some semantic boundary before implementation. If the root decided that boundary itself, the orchestrator would leak back into design authority by deciding that a bug fix, test correction, generated-output sync, or documentation update is semantics-preserving. Routing every implementation task through `480-design-architect` prevents that leak while keeping full Design Contracts conditional.
+
+This preserves the original simplicity goal:
+
+- the root still does not design or implement
+- behavior-changing work still gets a Design Contract only when needed
+- maintenance gets context transfer instead of behavior design
+- blocked or unclear semantic boundaries return to the user as one missing decision
+- no separate Design Contract or MTA files are introduced
+- delegation depth stays root-to-subagent only
 
 ## Design Output Contract
 
@@ -73,6 +96,21 @@ A `Minimal Transfer Analysis` is context only. It is not a design authority, sol
 
 For v1, the root embeds the design output in the Task Brief under `Design Input`. The workflow does not create separate Design Contract or MTA files.
 
+## MTA Format And Name
+
+The MTA format is shaped for Task Brief authoring while staying non-authoritative:
+
+- `Anchor` identifies the source of truth for the task.
+- `Request Summary` gives the orchestrator a concise objective seed.
+- `Observed Behavior` and `Expected Behavior` preserve the maintenance delta without prescribing a fix.
+- `Constraints` carries execution limits and semantic guardrails.
+- `Evidence` ties expected behavior to direct facts instead of new product intent.
+- `Out of Scope` maps directly to Task Brief non-goals.
+
+This is sufficient for the orchestrator to embed the MTA as `Design Input` and then write the Task Brief execution fields without inventing behavior. The format intentionally omits implementation steps, file-level guidance, and verification commands because those would turn MTA into an implementation plan.
+
+The name `Minimal Transfer Analysis` is descriptive for this role as long as "minimal" means minimal authority, not minimal useful context. It transfers enough analysis for maintenance implementation while avoiding Design Contract authority. A more explicit future name such as "Maintenance Transfer Analysis" would be compatible with the same MTA acronym, but this change keeps the existing name to avoid terminology churn.
+
 ## Reviewer And Developer Contract
 
 `480-developer` treats the Task Brief as the execution request. If the Task Brief includes a Design Contract, the developer treats it as the authoritative behavior contract. If the Task Brief includes an MTA, the developer treats it as context only.
@@ -85,7 +123,7 @@ This change does not:
 
 - rename the `480-architect` role id
 - change non-Codex provider behavior
-- make design delegation mandatory for all work
+- make design delegation mandatory for pure non-implementation conversation, review, explanation, or status reporting
 - introduce separate Design Contract or MTA artifact files
 - increase Codex delegation depth beyond the existing root-to-subagent model
 
@@ -96,7 +134,9 @@ The implementation is covered by installation and rendering tests that verify:
 - Codex installs include `480-design-architect`.
 - OpenCode, Claude, Qwen, and Gemini outputs do not include `480-design-architect`.
 - Codex root managed guidance uses Software Orchestrator language.
-- Codex root guidance references conditional use of `480-design-architect`.
+- Codex root guidance sends every implementation task through `480-design-architect`.
+- Bug fixes are not categorically skipped.
+- The orchestrator does not author design artifacts.
 - The design architect instruction enforces the Design Contract, MTA, and BLOCKED output boundary.
 - Developer and reviewer instructions handle Design Contract and MTA semantics.
 - Checked-in rendered artifacts remain in sync with the bundle definitions.

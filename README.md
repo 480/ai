@@ -45,9 +45,9 @@ The FEZ (480, Four-Eight-Zero) agent workflow follows a short, explicit loop:
 ```mermaid
 flowchart TB
   U["User request"] --> A["root Software Orchestrator"]
-  A --> C{"Behavior-changing?"}
+  A --> C{"Implementation task?"}
   C -->|yes| DA["480-design-architect"]
-  C -->|no| TB["Task Brief"]
+  C -->|no| N["Answer / review / explain"]
   DA --> TB
   TB --> D["480-developer"]
   D --> R["Dual reviews (480-code-reviewer / 480-code-reviewer2)"]
