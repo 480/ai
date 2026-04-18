@@ -6432,23 +6432,29 @@ manage_agents.install(target="codex", scope="user")
         common_developer = (REPO_ROOT / "bundles" / "common" / "instructions" / "480-developer.md").read_text(
             encoding="utf-8"
         )
+        opencode_developer = (provider_agents_source_dir("opencode") / "480-developer.md").read_text(encoding="utf-8")
+        claude_developer = (provider_agents_source_dir("claude") / "480-developer.md").read_text(encoding="utf-8")
         self.assert_developer_role_identity_contract(common_developer, codex_style=False)
         self.assert_developer_role_identity_contract(
-            (provider_agents_source_dir("opencode") / "480-developer.md").read_text(encoding="utf-8"),
+            opencode_developer,
             codex_style=False,
         )
         self.assert_developer_role_identity_contract(
-            (provider_agents_source_dir("claude") / "480-developer.md").read_text(encoding="utf-8"),
+            claude_developer,
             codex_style=False,
         )
         self.assertIn(
             "Resolve workspace context from the Task Brief path and any explicit absolute repository or worktree path first.",
-            (provider_agents_source_dir("opencode") / "480-developer.md").read_text(encoding="utf-8"),
+            opencode_developer,
         )
         self.assertIn(
             "Resolve workspace context from the Task Brief path and any explicit absolute repository or worktree path first.",
-            (provider_agents_source_dir("claude") / "480-developer.md").read_text(encoding="utf-8"),
+            claude_developer,
         )
+        for non_codex_developer in (common_developer, opencode_developer, claude_developer):
+            self.assertNotIn("You are a Codex implementation agent.", non_codex_developer)
+            self.assertNotIn("Mode A - Contract-driven implementation", non_codex_developer)
+            self.assertNotIn("Mode B - Direct maintenance implementation", non_codex_developer)
         self.assert_developer_role_identity_contract(
             (REPO_ROOT / "providers" / "codex" / "instructions" / "480-developer.md").read_text(encoding="utf-8"),
             codex_style=True,
@@ -6457,8 +6463,18 @@ manage_agents.install(target="codex", scope="user")
         codex_developer = tomllib.loads((provider_agents_source_dir("codex") / "480-developer.toml").read_text(encoding="utf-8"))
         self.assert_developer_role_identity_contract(codex_developer["developer_instructions"], codex_style=True)
         self.assertIn("Codex delegation safety", codex_developer["developer_instructions"])
+        self.assertIn("You are a Codex implementation agent. Produce deterministic implementation changes for exactly one approved Task Brief.", codex_developer["developer_instructions"])
+        self.assertIn("Behavior-changing work requires a Design Contract in the Task Brief `Design Input`.", codex_developer["developer_instructions"])
+        self.assertIn("Without a Design Contract, preserve existing system semantics and perform only semantics-preserving maintenance.", codex_developer["developer_instructions"])
+        self.assertIn("Do not silently introduce behavior, expand scope, change policy, or change invariants without a Design Contract.", codex_developer["developer_instructions"])
+        self.assertIn("If behavior authority, execution mode, or an implementation-critical decision is unclear, return `BLOCKED` to the parent `480` session with exactly one targeted blocker before coding.", codex_developer["developer_instructions"])
+        self.assertIn("Mode A - Contract-driven implementation", codex_developer["developer_instructions"])
+        self.assertIn("Mode B - Direct maintenance implementation", codex_developer["developer_instructions"])
         self.assertIn("If the Task Brief contains a `Design Input` section with a Design Contract", codex_developer["developer_instructions"])
         self.assertIn("Minimal Transfer Analysis, treat it as context only", codex_developer["developer_instructions"])
+        self.assertIn("It is not a design authority, solution, implementation plan, instruction set, or permission to introduce behavior.", codex_developer["developer_instructions"])
+        self.assertIn("Minimal Transfer Analysis can constrain the problem boundary and expected correctness target, but it cannot authorize new behavior, policy changes, invariant changes, or scope expansion.", codex_developer["developer_instructions"])
+        self.assertIn("If satisfying an MTA expected behavior would require behavior-changing work, stop and return `BLOCKED` because a Design Contract is required.", codex_developer["developer_instructions"])
         self.assertIn(
             "Do not spawn any subagents. The parent `480` session owns delegation, review, and child lifecycle management.",
             codex_developer["developer_instructions"],
@@ -6473,7 +6489,6 @@ manage_agents.install(target="codex", scope="user")
             "Do not treat a progress update as a completion report or stop the implementation or review loop.",
             codex_developer["developer_instructions"],
         )
-        claude_developer = (provider_agents_source_dir("claude") / "480-developer.md").read_text(encoding="utf-8")
         self.assertNotIn(
             "Let Codex manage child thread lifecycle unless a platform contract explicitly requires otherwise.",
             claude_developer,
