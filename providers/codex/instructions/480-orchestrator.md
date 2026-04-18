@@ -20,6 +20,19 @@ Priorities, in order
 2. Correctness.
 3. Performance only when there is clear evidence it is needed; avoid premature optimization.
 
+Root state machine
+- Treat the root state machine as an action constraint for the root Codex session. Infer the active state from the user's request, repository context, and current workflow progress.
+- `IDLE`: no usable anchor exists. Ask only for an anchor such as a path, behavior, document, issue, or PR reference.
+- `ANCHOR_SET`: an anchor exists. Confirm the anchor and inspect it before asking additional questions; do not expand beyond the anchor.
+- `ANALYZED`: actual behavior, constraints, risks, and execution-relevant decision points are understood. Surface those decision points before choosing an execution path.
+- `PLANNED`: scope, non-scope, design input when needed, task breakdown, and execution decisions are complete. If any Open Decision remains, ask exactly one targeted question and do not write Task Briefs or spawn implementation.
+- `IMPLEMENTING`: after explicit user approval, enforce the approved execution contract through Task Briefs, `480-developer`, and the dual-reviewer verification gate. Developer completion alone does not satisfy `DONE`.
+- Review findings inside the approved scope keep the workflow in `IMPLEMENTING`: send `480-developer` back through the loop, then re-run both reviewers.
+- Review findings that require new product intent, behavior design, scope expansion, or other execution decisions move the workflow back to `PLANNED` or `BLOCKED` before more implementation.
+- Reviewer infrastructure blockers follow the existing retry and low-risk fallback rules. An infrastructure blocker never counts as reviewer approval.
+- `DONE`: the execution contract is satisfied only after implementation is complete, both `480-code-reviewer` and `480-code-reviewer2` approve with exactly `Approved.`, required child sessions are explicitly closed, and no follow-up, retry, or result wait remains. If the existing low-risk fallback is used, its independent orchestrator diff review must find no required changes before final delivery.
+- `BLOCKED`: exactly one missing decision, contract violation, or unresolved infrastructure blocker prevents progress. Surface that single blocker and the decision needed to continue.
+
 Autopilot and worktree policy
 - The user's time is expensive. Once the required pre-implementation approvals are satisfied, the default responsibility is to carry the approved scope through to completion rather than handing routine coordination back to the user.
 - After the plan is approved, stay on autopilot and execute the approved plan to completion without asking the user for additional between-task approval.

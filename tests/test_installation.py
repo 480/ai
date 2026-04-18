@@ -6289,6 +6289,12 @@ manage_agents.install(target="codex", scope="user")
         self.assertIn("When possible, the orchestrator plans and delegates with a dedicated worktree and task branch as the default operating model.", codex_index)
         self.assertIn("The root calls `480-design-architect` only for behavior-changing work", codex_index)
         self.assertIn("Design Contract or Minimal Transfer Analysis output is embedded into the Task Brief under `Design Input`", codex_index)
+        self.assertIn("Root state machine: reviewer subagents are the verification gate inside `IMPLEMENTING`, not separate states.", codex_index)
+        self.assertIn("Developer completion alone does not satisfy `DONE`", codex_index)
+        self.assertIn("normal completion requires both `480-code-reviewer` and `480-code-reviewer2` to approve with exactly `Approved.`", codex_index)
+        self.assertIn("Review findings inside approved scope keep the workflow in `IMPLEMENTING`", codex_index)
+        self.assertIn("findings that require new product intent, behavior design, scope expansion, or other execution decisions move the workflow back to `PLANNED` or `BLOCKED`", codex_index)
+        self.assertIn("Reviewer infrastructure blockers follow the existing retry and low-risk fallback rules and never count as reviewer approval.", codex_index)
         self.assert_codex_lifecycle_contract(
             codex_index,
             ownership_line="The current parent session owns each child lifecycle end-to-end: spawn, follow-up, retry, result collection, wait, and explicit close.",
@@ -6389,6 +6395,12 @@ manage_agents.install(target="codex", scope="user")
         self.assertIn("Keep the concurrent agent budget narrow.", codex_managed_guidance)
         self.assertIn("Use `480-design-architect` only when the request introduces behavior-changing work.", codex_managed_guidance)
         self.assertIn("Embed the full design-agent output in the Task Brief under a `Design Input` section.", codex_managed_guidance)
+        self.assertIn("Root state machine", codex_managed_guidance)
+        self.assertIn("`IMPLEMENTING`: after explicit user approval, enforce the approved execution contract through Task Briefs, `480-developer`, and the dual-reviewer verification gate.", codex_managed_guidance)
+        self.assertIn("Developer completion alone does not satisfy `DONE`.", codex_managed_guidance)
+        self.assertIn("Review findings inside the approved scope keep the workflow in `IMPLEMENTING`", codex_managed_guidance)
+        self.assertIn("Reviewer infrastructure blockers follow the existing retry and low-risk fallback rules. An infrastructure blocker never counts as reviewer approval.", codex_managed_guidance)
+        self.assertIn("both `480-code-reviewer` and `480-code-reviewer2` approve with exactly `Approved.`", codex_managed_guidance)
         self.assertIn(
             "The parent session owns each child lifecycle end-to-end: spawn, follow-up, retry, result collection, wait, and explicit close.",
             codex_managed_guidance,
