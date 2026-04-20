@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any, TextIO
 
 if __package__:
-    from .agent_bundle import load_bundle, target_agent_names
+    from .agent_bundle import load_bundle, target_agent_names, target_agent_specs
     from . import installer_core
     from .install_targets import (
         InstallTarget,
@@ -33,7 +33,7 @@ if __package__:
     from .installer_core import uninstall as run_uninstall
     from .render_agents import render_codex_managed_guidance, write_provider_outputs
 else:  # pragma: no cover
-    from agent_bundle import load_bundle, target_agent_names
+    from agent_bundle import load_bundle, target_agent_names, target_agent_specs
     import installer_core
     from install_targets import (
         InstallTarget,
@@ -248,7 +248,7 @@ def advanced_model_selection_for_target(
     provider = get_provider(target)
     selected_options = {} if role_options is None else dict(role_options)
     resolved_options: dict[str, str] = {}
-    for spec in load_bundle():
+    for spec in target_agent_specs(target):
         role_id = spec.identifier
         option_key = selected_options.get(role_id)
         if option_key is None:
@@ -312,7 +312,7 @@ def normalize_legacy_role_model_option_key(*, target: str, role_id: str, option_
 def parse_role_model_choice_entries(entries: list[str], *, target: str) -> dict[str, str]:
     provider = get_provider(target)
     parsed: dict[str, str] = {}
-    known_roles = {spec.identifier for spec in load_bundle()}
+    known_roles = {spec.identifier for spec in target_agent_specs(target)}
     for entry in entries:
         role_id, separator, option_key = entry.partition("=")
         if separator != "=" or not role_id or not option_key:
@@ -814,7 +814,7 @@ def build_install_summary_lines(requests: tuple[ProviderInstallRequest, ...]) ->
         lines.append(f"  model mode: {model_mode}")
         if request.model_selection is not None and request.model_selection.mode == "advanced":
             lines.append("  model selection by role:")
-            for spec in load_bundle():
+            for spec in target_agent_specs(request.target):
                 option = resolved_advanced_role_model_option(request, provider=provider, spec=spec)
                 lines.append(f"    {spec.display_name}: {option.key} ({option.label})")
     return lines
@@ -822,7 +822,7 @@ def build_install_summary_lines(requests: tuple[ProviderInstallRequest, ...]) ->
 
 def prompt_install_options_tui() -> InstallOptions:
     target_choices = required_interactive_provider_choices()
-    role_specs = tuple(load_bundle())
+    role_specs_by_target = {choice.value: target_agent_specs(choice.value) for choice in target_choices}
     try:
         import curses
     except ImportError as exc:
@@ -882,7 +882,7 @@ def prompt_install_options_tui() -> InstallOptions:
                 steps.append("desktop_notifications")
             steps.append("model_mode")
             if state["model_mode"] == "advanced":
-                steps.extend(f"role:{spec.identifier}" for spec in role_specs)
+                steps.extend(f"role:{spec.identifier}" for spec in role_specs_by_target[target])
             return steps
 
         target_index = 0
@@ -1000,7 +1000,7 @@ def prompt_install_options_tui() -> InstallOptions:
                     state["model_mode"] = selection
                 else:
                     role_id = current_step.split(":", 1)[1]
-                    spec = next(spec for spec in role_specs if spec.identifier == role_id)
+                    spec = next(spec for spec in role_specs_by_target[target] if spec.identifier == role_id)
                     choices = tuple(
                         Choice(value=option.key, label=option.label, note=option.note)
                         for option in provider.advanced_role_model_options(spec.identifier)
@@ -1171,7 +1171,7 @@ def prompt_install_options_basic(
     role_options: dict[str, str] = {}
     print_line(output, "Advanced mode: choose curated models by role.")
     print_line(output)
-    for spec in load_bundle():
+    for spec in target_agent_specs(target):
         default_option = provider.default_advanced_role_model_option(spec)
         choices = tuple(
             Choice(value=option.key, label=option.label, note=option.note)

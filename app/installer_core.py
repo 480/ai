@@ -1922,6 +1922,15 @@ def default_state(agent_names: list[str]) -> dict:
     }
 
 
+CODEX_PRE_DESIGN_ARCHITECT_AGENT_NAMES = [
+    "480-developer",
+    "480-code-reviewer",
+    "480-code-reviewer2",
+    "480-code-scanner",
+]
+CODEX_DESIGN_ARCHITECT_AGENT_NAME = "480-design-architect"
+
+
 def _remap_state_field_keys(field: object, name_map: dict[str, str]) -> object:
     if not isinstance(field, dict):
         return field
@@ -1995,6 +2004,33 @@ def migrate_legacy_state(target: InstallTarget, state: dict, agent_names: list[s
                     "value": activation.managed_value,
                 }
 
+    return migrated
+
+
+def migrate_codex_managed_agent_state(target: InstallTarget, state: dict, agent_names: list[str]) -> dict:
+    if target.name != "codex":
+        return state
+
+    old_agent_names = CODEX_PRE_DESIGN_ARCHITECT_AGENT_NAMES
+    expected_agent_names = [CODEX_DESIGN_ARCHITECT_AGENT_NAME, *old_agent_names]
+    if agent_names != expected_agent_names or state.get("managed_agents") != old_agent_names:
+        return state
+
+    migrated = dict(state)
+    field_defaults = {
+        "managed": False,
+        "managed_file_metadata": None,
+        "pending_cleanup": False,
+    }
+    for field_name, default_value in field_defaults.items():
+        field_value = state.get(field_name)
+        if not isinstance(field_value, dict) or set(field_value) != set(old_agent_names):
+            return state
+        extended = dict(field_value)
+        extended[CODEX_DESIGN_ARCHITECT_AGENT_NAME] = default_value
+        migrated[field_name] = {name: extended[name] for name in agent_names}
+
+    migrated["managed_agents"] = agent_names.copy()
     return migrated
 
 
@@ -2505,6 +2541,7 @@ def load_state(target: InstallTarget, agent_names: list[str], *, recover_invalid
         return recovered_state
 
     state = migrate_legacy_state(target, raw_state, agent_names)
+    state = migrate_codex_managed_agent_state(target, state, agent_names)
     state = normalize_install_state_backups(target, state, agent_names)
 
     try:

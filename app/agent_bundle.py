@@ -26,6 +26,10 @@ class AgentSpec:
     reasoning: str
     instruction_source: Path
     target_metadata: dict[str, object]
+    targets: tuple[str, ...] = ("opencode", "claude", "codex", "qwen", "gemini")
+
+    def supports_target(self, target: str) -> bool:
+        return target in self.targets
 
     @property
     def opencode_metadata(self) -> dict[str, object]:
@@ -82,6 +86,11 @@ def load_bundle() -> tuple[AgentSpec, ...]:
     if not isinstance(roles, list) or not roles:
         raise ValueError(f"Invalid 'roles' in {BUNDLE_PATH}.")
 
+    targets = manifest.get("targets")
+    if not isinstance(targets, list) or not targets or not all(isinstance(target, str) and target for target in targets):
+        raise ValueError(f"Invalid 'targets' in {BUNDLE_PATH}.")
+    known_targets = tuple(targets)
+
     seen_ids: set[str] = set()
     specs: list[AgentSpec] = []
     for role in roles:
@@ -93,9 +102,24 @@ def load_bundle() -> tuple[AgentSpec, ...]:
             raise ValueError(f"Duplicate role id '{identifier}' in {BUNDLE_PATH}.")
         seen_ids.add(identifier)
 
+        raw_targets = role.get("targets", known_targets)
+        if not isinstance(raw_targets, (list, tuple)) or not raw_targets or not all(
+            isinstance(target, str) and target for target in raw_targets
+        ):
+            raise ValueError(f"Invalid 'targets' for {identifier} in {BUNDLE_PATH}.")
+        role_targets = tuple(raw_targets)
+        unknown_targets = sorted(set(role_targets) - set(known_targets))
+        if unknown_targets:
+            raise ValueError(f"Unknown targets for {identifier} in {BUNDLE_PATH}: {', '.join(unknown_targets)}")
+
         instruction_source = REPO_ROOT / _require_string(role, "instruction_source")
         if not instruction_source.exists():
             raise ValueError(f"Missing instruction source for {identifier}: {instruction_source}")
+
+        target_metadata = _require_object(role, "target_metadata")
+        missing_metadata = [target for target in role_targets if target not in target_metadata]
+        if missing_metadata:
+            raise ValueError(f"Missing target metadata for {identifier}: {', '.join(missing_metadata)}")
 
         specs.append(
             AgentSpec(
@@ -107,7 +131,8 @@ def load_bundle() -> tuple[AgentSpec, ...]:
                 model=_require_string(role, "model"),
                 reasoning=_require_string(role, "reasoning"),
                 instruction_source=instruction_source,
-                target_metadata=_require_object(role, "target_metadata"),
+                target_metadata=target_metadata,
+                targets=role_targets,
             )
         )
 
@@ -118,10 +143,14 @@ def agent_names() -> list[str]:
     return [spec.identifier for spec in load_bundle()]
 
 
+def target_agent_specs(target: str) -> tuple[AgentSpec, ...]:
+    return tuple(spec for spec in load_bundle() if spec.supports_target(target))
+
+
 def target_agent_names(target: str) -> list[str]:
     provider = get_provider(target)
     agent_names: list[str] = []
-    for spec in load_bundle():
+    for spec in target_agent_specs(target):
         if target == "codex" and spec.mode == "primary":
             continue
         agent_names.append(provider.bundle_agent_name(spec))

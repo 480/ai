@@ -42,6 +42,14 @@ AGENTS = [
     "480-code-reviewer2",
     "480-code-scanner",
 ]
+BUNDLE_AGENTS = [
+    "480-architect",
+    "480-design-architect",
+    "480-developer",
+    "480-code-reviewer",
+    "480-code-reviewer2",
+    "480-code-scanner",
+]
 CLAUDE_AGENTS = [
     "480-architect",
     "480-developer",
@@ -57,12 +65,20 @@ LEGACY_CLAUDE_AGENTS = {
     "ai-code-scanner": "480-code-scanner",
 }
 CODEX_CANONICAL_AGENTS = [
+    "480-design-architect",
+    "480-developer",
+    "480-code-reviewer",
+    "480-code-reviewer2",
+    "480-code-scanner",
+]
+OLD_CODEX_AGENTS = [
     "480-developer",
     "480-code-reviewer",
     "480-code-reviewer2",
     "480-code-scanner",
 ]
 CODEX_AGENTS = [
+    "480-design-architect",
     "480-developer",
     "480-code-reviewer",
     "480-code-reviewer2",
@@ -342,6 +358,8 @@ class InstallationTests(unittest.TestCase):
 
     def assert_scanner_output_path_contract(self, text: str) -> None:
         self.assertIn("`docs/480ai/ARCHITECTURE.md`", text)
+        self.assertIn("If that file is missing during a scan, create it", text)
+        self.assertIn("Create the file when it is missing", text)
         self.assertNotIn("called ARCHITECTURE.md at the root of the repo", text)
         self.assertRegex(text, r"Do not modify any files except .*docs/480ai/ARCHITECTURE\.md")
         self.assertIn("The user's time is expensive.", text)
@@ -350,6 +368,15 @@ class InstallationTests(unittest.TestCase):
             "Absorb small uncertainties with evidence-based judgments and explicit assumptions when that is sufficient.",
             text,
         )
+        self.assertIn("Treat `docs/480ai/ARCHITECTURE.md` as a 480ai working artifact", text)
+        self.assertIn("capability boundaries such as read vs write paths, orchestration vs serving paths", text)
+        self.assertIn("source-of-truth ownership", text)
+        self.assertIn("configuration ownership", text)
+        self.assertIn("abstraction consumers", text)
+        self.assertIn("If an abstraction appears to combine multiple capabilities", text)
+        self.assertIn("Document risks and open questions with evidence.", text)
+        self.assertIn("Do not add framework-specific recommendations or implementation prescriptions.", text)
+        self.assertNotIn("Spring bean", text)
 
     def assert_developer_role_identity_contract(self, text: str, *, codex_style: bool) -> None:
         if codex_style:
@@ -651,6 +678,10 @@ class InstallationTests(unittest.TestCase):
         self.assertEqual(codex_developer.model, "gpt-5.4-mini")
         self.assertEqual(codex_developer.effort, "medium")
 
+        codex_design_architect = codex.recommended_role_model_config(specs["480-design-architect"])
+        self.assertEqual(codex_design_architect.model, "gpt-5.4")
+        self.assertEqual(codex_design_architect.effort, "xhigh")
+
         codex_scanner = codex.recommended_role_model_config(specs["480-code-scanner"])
         self.assertEqual(codex_scanner.model, "gpt-5.3-codex-spark")
         self.assertEqual(codex_scanner.effort, "low")
@@ -664,11 +695,9 @@ class InstallationTests(unittest.TestCase):
         self.assertEqual(codex_reviewer2.effort, "medium")
 
     def test_provider_model_profiles_define_advanced_curated_options_for_every_role(self) -> None:
-        role_ids = {spec.identifier for spec in agent_bundle.load_bundle()}
-
         for provider in all_providers():
-            for role_id in role_ids:
-                options = provider.advanced_role_model_options(role_id)
+            for spec in agent_bundle.target_agent_specs(provider.identifier):
+                options = provider.advanced_role_model_options(spec.identifier)
                 self.assertGreaterEqual(len(options), 2)
                 self.assertEqual(len({option.key for option in options}), len(options))
                 for option in options:
@@ -699,6 +728,10 @@ class InstallationTests(unittest.TestCase):
             "gpt-5.4-medium",
         )
         self.assertEqual(
+            get_provider("codex").default_advanced_role_model_option(specs["480-design-architect"]).key,
+            "gpt-5.4-xhigh",
+        )
+        self.assertEqual(
             get_provider("codex").default_advanced_role_model_option(specs["480-code-reviewer"]).key,
             "gpt-5.4-high",
         )
@@ -716,6 +749,11 @@ class InstallationTests(unittest.TestCase):
         self.assertEqual(agent_bundle.target_agent_names("opencode"), AGENTS)
         self.assertEqual(agent_bundle.target_agent_names("claude"), CLAUDE_AGENTS)
         self.assertEqual(agent_bundle.target_agent_names("codex"), CODEX_AGENTS)
+        self.assertNotIn("480-design-architect", agent_bundle.target_agent_names("opencode"))
+        self.assertNotIn("480-design-architect", agent_bundle.target_agent_names("claude"))
+        self.assertNotIn("480-design-architect", agent_bundle.target_agent_names("qwen"))
+        self.assertNotIn("480-design-architect", agent_bundle.target_agent_names("gemini"))
+        self.assertIn("480-design-architect", agent_bundle.target_agent_names("codex"))
 
     def test_opencode_user_target_resolver_matches_existing_paths(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1569,6 +1607,109 @@ manage_agents.install(target="codex", scope="user")
             self.assertIn(original_guidance, reinstalled_guidance)
             self.assertEqual(reinstalled_guidance.count(installer_core.CODEX_MANAGED_AGENTS_START), 1)
             self.assertEqual(reinstalled_guidance.count(installer_core.CODEX_MANAGED_AGENTS_END), 1)
+
+    def test_codex_user_install_migrates_pre_design_architect_state(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            target = resolve_install_target("codex", "user", home=home)
+            config_path = home / ".codex" / "config.toml"
+            guidance_path = home / ".codex" / "AGENTS.md"
+            state_path = home / ".codex" / ".480ai-bootstrap" / "state.json"
+            config_path.parent.mkdir(parents=True, exist_ok=True)
+            config_path.write_text('model = "gpt-5.4"\n', encoding="utf-8")
+            guidance_path.write_text("keep user guidance\n", encoding="utf-8")
+            self.write_json(
+                state_path,
+                {
+                    "version": 1,
+                    "managed_agents": list(OLD_CODEX_AGENTS),
+                    "backups": {},
+                    "managed": {name: True for name in OLD_CODEX_AGENTS},
+                    "managed_file_metadata": {name: None for name in OLD_CODEX_AGENTS},
+                    "pending_cleanup": {name: False for name in OLD_CODEX_AGENTS},
+                },
+            )
+
+            migrated_state = installer_core.load_state(target, CODEX_AGENTS)
+            self.assertEqual(migrated_state["managed_agents"], CODEX_AGENTS)
+            self.assertFalse(migrated_state["managed"]["480-design-architect"])
+            self.assertIsNone(migrated_state["managed_file_metadata"]["480-design-architect"])
+            self.assertFalse(migrated_state["pending_cleanup"]["480-design-architect"])
+
+            with self.patched_manage_agents_home(home), mock.patch(
+                "app.installer_core.cleanup_invalid_install_backups"
+            ) as cleanup_invalid_backups:
+                installer_core.install(
+                    target,
+                    provider_agents_source_dir("codex"),
+                    CODEX_AGENTS,
+                    codex_managed_guidance=render_agents.render_codex_managed_guidance(agent_bundle.load_bundle()),
+                )
+
+            cleanup_invalid_backups.assert_not_called()
+            state = self.read_json(state_path)
+            self.assertEqual(state["managed_agents"], CODEX_AGENTS)
+            self.assertTrue(state["managed"]["480-design-architect"])
+            self.assertIsNotNone(state["managed_file_metadata"]["480-design-architect"])
+            self.assertFalse(state["pending_cleanup"]["480-design-architect"])
+            self.assertIn("keep user guidance\n", guidance_path.read_text(encoding="utf-8"))
+            parsed_config = tomllib.loads(config_path.read_text(encoding="utf-8"))
+            self.assertEqual(parsed_config["model"], "gpt-5.4")
+            self.assertTrue(parsed_config["features"]["multi_agent"])
+            self.assertEqual(parsed_config["agents"]["max_depth"], 1)
+
+    def test_codex_user_uninstall_migrates_pre_design_architect_state(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            state_path = home / ".codex" / ".480ai-bootstrap" / "state.json"
+            agents_dir = home / ".codex" / "agents"
+            self.write_json(
+                state_path,
+                {
+                    "version": 1,
+                    "managed_agents": list(OLD_CODEX_AGENTS),
+                    "backups": {},
+                    "managed": {name: True for name in OLD_CODEX_AGENTS},
+                    "managed_file_metadata": {name: None for name in OLD_CODEX_AGENTS},
+                    "pending_cleanup": {name: False for name in OLD_CODEX_AGENTS},
+                },
+            )
+            agents_dir.mkdir(parents=True, exist_ok=True)
+            for name in OLD_CODEX_AGENTS:
+                source = provider_agents_source_dir("codex") / f"{name}.toml"
+                (agents_dir / f"{name}.toml").write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
+
+            result = self.run_command_capture(home, "uninstall", "--target", "codex", "--scope", "user")
+
+            self.assertEqual(result.returncode, 0)
+            self.assertNotIn("best-effort", result.stdout)
+            self.assertNotIn("invalid 480ai install state", result.stdout)
+            self.assertFalse(state_path.exists())
+            for name in OLD_CODEX_AGENTS:
+                self.assertFalse((agents_dir / f"{name}.toml").exists())
+
+    def test_codex_uninstall_rejects_non_exact_sparse_managed_agent_state(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            state_path = home / ".codex" / ".480ai-bootstrap" / "state.json"
+            sparse_agents = OLD_CODEX_AGENTS[:-1]
+            self.write_json(
+                state_path,
+                {
+                    "version": 1,
+                    "managed_agents": sparse_agents,
+                    "backups": {},
+                    "managed": {name: True for name in sparse_agents},
+                    "managed_file_metadata": {name: None for name in sparse_agents},
+                    "pending_cleanup": {name: False for name in sparse_agents},
+                },
+            )
+
+            result = self.run_command_capture(home, "uninstall", "--target", "codex", "--scope", "user")
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Invalid managed_agents", result.stderr)
+            self.assertTrue(state_path.exists())
 
     def test_codex_user_install_cleans_legacy_architect_agent_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -6215,7 +6356,7 @@ manage_agents.install(target="codex", scope="user")
         common_architect = (REPO_ROOT / "bundles" / "common" / "instructions" / "480-architect.md").read_text(
             encoding="utf-8"
         )
-        codex_architect = (REPO_ROOT / "providers" / "codex" / "instructions" / "480-architect.md").read_text(
+        codex_architect = (REPO_ROOT / "providers" / "codex" / "instructions" / "480-orchestrator.md").read_text(
             encoding="utf-8"
         )
         opencode_architect = (provider_agents_source_dir("opencode") / "480-architect.md").read_text(encoding="utf-8")
@@ -6235,10 +6376,11 @@ manage_agents.install(target="codex", scope="user")
             mention_uninstall=True,
             mention_env_key=True,
         )
-        self.assertIn("Codex uses the 480ai managed block in the root `AGENTS.md` as the architect main prompt.", codex_index)
-        self.assertIn("`providers/codex/instructions/480-architect.md`", codex_index)
-        self.assertIn("there is no separate architect custom agent", codex_index)
-        self.assertIn("Codex custom agents provide only the four subagents below.", codex_index)
+        self.assertIn("Codex uses the 480ai managed block in the root `AGENTS.md` as the Software Orchestrator main prompt.", codex_index)
+        self.assertIn("`providers/codex/instructions/480-orchestrator.md`", codex_index)
+        self.assertIn("the design architect is a separate design handoff subagent", codex_index)
+        self.assertIn("Codex custom agents provide the five subagents below.", codex_index)
+        self.assertIn("`480-design-architect` -> `480-design-architect`", codex_index)
         self.assertIn("`BOOTSTRAP_CODEX_USER_ROOT`", codex_index)
         self.assertIn("`--codex-user-root`", codex_index)
         self.assertIn("`~/.codex-harness`", codex_index)
@@ -6251,7 +6393,7 @@ manage_agents.install(target="codex", scope="user")
         self.assertIn("Alternate-root installs isolate managed agents, `AGENTS.md`, `config.toml`, bootstrap state, and optional desktop notification assets under that selected root only.", codex_index)
         self.assertIn("Alternate-root verification reports install-state health for the selected root only and does not claim runtime profile activation.", codex_index)
         self.assertIn(
-            "This architect workflow is for the root Codex session only. Spawned `480-developer`/reviewer/scanner sessions must ignore those architect-only rules and follow their own custom agent instructions.",
+            "This orchestrator workflow is for the root Codex session only. Spawned `480-design-architect`/developer/reviewer/scanner sessions must ignore those root-only rules and follow their own custom agent instructions.",
             codex_index,
         )
         self.assertIn("Codex install/uninstall also clean up legacy `480-architect.toml` and `480.toml` leftovers when present.", codex_index)
@@ -6264,7 +6406,18 @@ manage_agents.install(target="codex", scope="user")
         self.assertIn("Reviewers review in-thread", codex_index)
         self.assertIn("Keep the concurrent agent budget narrow", codex_index)
         self.assertIn("dedicated worktree and task branch", codex_index)
-        self.assertIn("When possible, the architect plans and delegates with a dedicated worktree and task branch as the default operating model.", codex_index)
+        self.assertIn("When possible, the orchestrator plans and delegates with a dedicated worktree and task branch as the default operating model.", codex_index)
+        self.assertIn("The root calls `480-design-architect` for every implementation task before Task Brief authoring", codex_index)
+        self.assertIn("Pure non-implementation conversation, review, explanation, or status reporting does not need Design Input.", codex_index)
+        self.assertIn("The root does not author design artifacts", codex_index)
+        self.assertIn("Bug fixes are not categorically skipped", codex_index)
+        self.assertIn("Design Contract or Minimal Transfer Analysis output is embedded into every implementation Task Brief under `Design Input`", codex_index)
+        self.assertIn("Root state machine: reviewer subagents are the verification gate inside `IMPLEMENTING`, not separate states.", codex_index)
+        self.assertIn("Developer completion alone does not satisfy `DONE`", codex_index)
+        self.assertIn("normal completion requires both `480-code-reviewer` and `480-code-reviewer2` to approve with exactly `Approved.`", codex_index)
+        self.assertIn("Review findings inside approved scope keep the workflow in `IMPLEMENTING`", codex_index)
+        self.assertIn("findings that require new product intent, behavior design, scope expansion, or other execution decisions move the workflow back to `PLANNED` or `BLOCKED`", codex_index)
+        self.assertIn("Reviewer infrastructure blockers follow the existing retry and low-risk fallback rules and never count as reviewer approval.", codex_index)
         self.assert_codex_lifecycle_contract(
             codex_index,
             ownership_line="The current parent session owns each child lifecycle end-to-end: spawn, follow-up, retry, result collection, wait, and explicit close.",
@@ -6288,29 +6441,33 @@ manage_agents.install(target="codex", scope="user")
         self.assertIn("Treat a spawn response with no `agent_id`, or any non-structured spawn response, as `spawn_failure`.", codex_index)
         self.assertIn("Classify `spawn_failure`, thread limit failures, and usage limit failures as delegation infrastructure blockers, not implementation blockers.", codex_index)
         self.assertIn("If the blocker remains after one retry in the same session, return only a structured blocker report to the current parent session/thread.", codex_index)
-        self.assertIn("Low-risk fallback: if one reviewer has approved and the other reviewer is blocked only by delegation infrastructure, the architect may run an independent diff review when the changed files are limited to prompts, docs, config metadata, or tests.", codex_index)
+        self.assertIn("Low-risk fallback: if one reviewer has approved and the other reviewer is blocked only by delegation infrastructure, the orchestrator may run an independent diff review when the changed files are limited to prompts, docs, config metadata, or tests.", codex_index)
         self.assertIn("Do not waive any explicit change request from either reviewer.", codex_index)
         self.assertIn("Do not make `new session` or `exception allowed` the default path for users.", codex_index)
         self.assertIn("Existing user content is preserved and only the 480ai managed block is appended.", codex_index)
         self.assertIn("Uninstall removes only the 480ai managed block.", codex_index)
         self.assertIn(
-            "Architect rules apply only to the root session, and spawned subagents explicitly ignore those architect-only rules in favor of their own custom agent instructions.",
+            "Root orchestrator rules apply only to the root session, and spawned subagents explicitly ignore those root-only rules in favor of their own custom agent instructions.",
             codex_index,
         )
         self.assertIn(
-            "This architect workflow applies only to the root Codex session that starts from the main `AGENTS.md` instruction chain and directly coordinates with the user.",
+            "This orchestrator workflow applies only to the root Codex session that starts from the main `AGENTS.md` instruction chain and directly coordinates with the user.",
             codex_architect,
         )
         self.assertIn(
-            "If this session was spawned as a child custom agent, these architect-only requirements are inherited background only and must not be treated as the child's operating contract.",
+            "If this session was spawned as a child custom agent, these root-only requirements are inherited background only and must not be treated as the child's operating contract.",
             codex_architect,
         )
         self.assertIn(
-            "If this session was spawned as a child custom agent, these architect-only requirements are inherited background only and must not be treated as the child's operating contract.",
+            "If this session was spawned as a child custom agent, these root-only requirements are inherited background only and must not be treated as the child's operating contract.",
             codex_managed_guidance,
         )
         self.assertIn(
             "Plan the next work for docs/480ai/example-topic/001-example-task.md.",
+            codex_index,
+        )
+        self.assertIn(
+            "Have 480-design-architect produce Design Input for the implementation task and embed it in the Task Brief under `Design Input`.",
             codex_index,
         )
         self.assertIn(
@@ -6357,8 +6514,19 @@ manage_agents.install(target="codex", scope="user")
             close_line="After you spawn a child, keep the task active until you have collected the child's result, waited through any required follow-up, and explicitly closed or otherwise released finished child sessions.",
         )
         self.assertIn("Codex native delegation contract", codex_managed_guidance)
-        self.assertIn("root architect session (depth 0) -> subagents (depth 1) only", codex_managed_guidance)
+        self.assertIn("root orchestrator session (depth 0) -> subagents (depth 1) only", codex_managed_guidance)
         self.assertIn("Keep the concurrent agent budget narrow.", codex_managed_guidance)
+        self.assertIn("For every implementation task, spawn `480-design-architect` before writing a Task Brief.", codex_managed_guidance)
+        self.assertIn("Implementation task means any workflow that will lead to repository changes, including code, tests, configuration, documentation-only updates, generated-output synchronization, and bug fixes.", codex_managed_guidance)
+        self.assertIn("The orchestrator does not author design artifacts", codex_managed_guidance)
+        self.assertIn("Embed the full design-agent output in every implementation Task Brief under a `Design Input` section.", codex_managed_guidance)
+        self.assertNotIn("Skip design delegation for maintenance work", codex_managed_guidance)
+        self.assertIn("Root state machine", codex_managed_guidance)
+        self.assertIn("`IMPLEMENTING`: after explicit user approval, enforce the approved execution contract through Task Briefs, `480-developer`, and the dual-reviewer verification gate.", codex_managed_guidance)
+        self.assertIn("Developer completion alone does not satisfy `DONE`.", codex_managed_guidance)
+        self.assertIn("Review findings inside the approved scope keep the workflow in `IMPLEMENTING`", codex_managed_guidance)
+        self.assertIn("Reviewer infrastructure blockers follow the existing retry and low-risk fallback rules. An infrastructure blocker never counts as reviewer approval.", codex_managed_guidance)
+        self.assertIn("both `480-code-reviewer` and `480-code-reviewer2` approve with exactly `Approved.`", codex_managed_guidance)
         self.assertIn(
             "The parent session owns each child lifecycle end-to-end: spawn, follow-up, retry, result collection, wait, and explicit close.",
             codex_managed_guidance,
@@ -6373,6 +6541,15 @@ manage_agents.install(target="codex", scope="user")
         )
         self.assertIn("Treat a spawn response with no `agent_id`, or any non-structured spawn response, as `spawn_failure`.", codex_managed_guidance)
         self.assertIn("Any explicit change request from either reviewer is a real review finding and is never waived by this fallback.", codex_managed_guidance)
+        self.assertIn("Decision Closure Gate", codex_architect)
+        self.assertIn("Decision Closure Gate", codex_managed_guidance)
+        self.assertIn("include relevant scanner findings and `docs/480ai/ARCHITECTURE.md` constraints", codex_architect)
+        self.assertIn("include relevant scanner findings and `docs/480ai/ARCHITECTURE.md` constraints", codex_managed_guidance)
+        self.assertIn("spawn `480-code-scanner` before the design handoff", codex_architect)
+        self.assertIn("spawn `480-code-scanner` before the design handoff", codex_managed_guidance)
+        self.assertIn("Track `Source Open Items`", codex_managed_guidance)
+        self.assertIn("minimum safe behavior", codex_managed_guidance)
+        self.assertIn("Decision Closure Summary", codex_managed_guidance)
         self.assertIn("prefer longer waits over short polling loops", codex_managed_guidance)
         self.assertIn("Do not send user-facing \"still waiting\"", codex_managed_guidance)
         self.assertIn("User-facing wait updates should be change-based", codex_managed_guidance)
@@ -6390,23 +6567,29 @@ manage_agents.install(target="codex", scope="user")
         common_developer = (REPO_ROOT / "bundles" / "common" / "instructions" / "480-developer.md").read_text(
             encoding="utf-8"
         )
+        opencode_developer = (provider_agents_source_dir("opencode") / "480-developer.md").read_text(encoding="utf-8")
+        claude_developer = (provider_agents_source_dir("claude") / "480-developer.md").read_text(encoding="utf-8")
         self.assert_developer_role_identity_contract(common_developer, codex_style=False)
         self.assert_developer_role_identity_contract(
-            (provider_agents_source_dir("opencode") / "480-developer.md").read_text(encoding="utf-8"),
+            opencode_developer,
             codex_style=False,
         )
         self.assert_developer_role_identity_contract(
-            (provider_agents_source_dir("claude") / "480-developer.md").read_text(encoding="utf-8"),
+            claude_developer,
             codex_style=False,
         )
         self.assertIn(
             "Resolve workspace context from the Task Brief path and any explicit absolute repository or worktree path first.",
-            (provider_agents_source_dir("opencode") / "480-developer.md").read_text(encoding="utf-8"),
+            opencode_developer,
         )
         self.assertIn(
             "Resolve workspace context from the Task Brief path and any explicit absolute repository or worktree path first.",
-            (provider_agents_source_dir("claude") / "480-developer.md").read_text(encoding="utf-8"),
+            claude_developer,
         )
+        for non_codex_developer in (common_developer, opencode_developer, claude_developer):
+            self.assertNotIn("You are a Codex implementation agent.", non_codex_developer)
+            self.assertNotIn("Mode A - Contract-driven implementation", non_codex_developer)
+            self.assertNotIn("Mode B - Direct maintenance implementation", non_codex_developer)
         self.assert_developer_role_identity_contract(
             (REPO_ROOT / "providers" / "codex" / "instructions" / "480-developer.md").read_text(encoding="utf-8"),
             codex_style=True,
@@ -6415,6 +6598,20 @@ manage_agents.install(target="codex", scope="user")
         codex_developer = tomllib.loads((provider_agents_source_dir("codex") / "480-developer.toml").read_text(encoding="utf-8"))
         self.assert_developer_role_identity_contract(codex_developer["developer_instructions"], codex_style=True)
         self.assertIn("Codex delegation safety", codex_developer["developer_instructions"])
+        self.assertIn("You are a Codex implementation agent. Produce deterministic implementation changes for exactly one approved Task Brief.", codex_developer["developer_instructions"])
+        self.assertIn("Normal Codex implementation Task Briefs are expected to include `Design Input` from `480-design-architect`.", codex_developer["developer_instructions"])
+        self.assertIn("Behavior-changing work requires a Design Contract in the Task Brief `Design Input`.", codex_developer["developer_instructions"])
+        self.assertIn("MTA-backed work may implement maintenance that preserves or restores already-defined behavior, including bug fixes, but cannot introduce new behavior or product decisions.", codex_developer["developer_instructions"])
+        self.assertIn("Do not silently introduce behavior, expand scope, change policy, or change invariants without a Design Contract.", codex_developer["developer_instructions"])
+        self.assertIn("If Design Input is missing, behavior authority is unclear, execution mode is unclear, or an implementation-critical decision is unclear, return `BLOCKED` to the parent `480` session with exactly one targeted blocker before coding.", codex_developer["developer_instructions"])
+        self.assertIn("Mode A - Contract-driven implementation", codex_developer["developer_instructions"])
+        self.assertIn("Mode B - MTA-backed maintenance implementation", codex_developer["developer_instructions"])
+        self.assertIn("If the Task Brief lacks a `Design Input` section, stop and return `BLOCKED` for parent correction before coding.", codex_developer["developer_instructions"])
+        self.assertIn("If the Task Brief contains a `Design Input` section with a Design Contract", codex_developer["developer_instructions"])
+        self.assertIn("Minimal Transfer Analysis, treat it as context only", codex_developer["developer_instructions"])
+        self.assertIn("It is not a design authority, solution, implementation plan, instruction set, or permission to introduce behavior.", codex_developer["developer_instructions"])
+        self.assertIn("Minimal Transfer Analysis can constrain the problem boundary and already-defined expected correctness target, but it cannot authorize new behavior, product decisions, policy changes, invariant changes, or scope expansion.", codex_developer["developer_instructions"])
+        self.assertIn("If the Task Brief lacks Design Input, or if satisfying an MTA expected behavior would require behavior-changing work, stop and return `BLOCKED` because a Design Contract or parent correction is required.", codex_developer["developer_instructions"])
         self.assertIn(
             "Do not spawn any subagents. The parent `480` session owns delegation, review, and child lifecycle management.",
             codex_developer["developer_instructions"],
@@ -6422,14 +6619,13 @@ manage_agents.install(target="codex", scope="user")
         self.assertNotIn("After completing your implementation, request review from", codex_developer["developer_instructions"])
         self.assertNotIn("Parse reviewer responses using the reviewer contract", codex_developer["developer_instructions"])
         self.assertIn(
-            "Ignore any root-session-only architect planning or delegation rules inherited from the root `AGENTS.md`; they do not apply inside this spawned child session.",
+            "Ignore any root-session-only orchestrator planning or delegation rules inherited from the root `AGENTS.md`; they do not apply inside this spawned child session.",
             codex_developer["developer_instructions"],
         )
         self.assertIn(
             "Do not treat a progress update as a completion report or stop the implementation or review loop.",
             codex_developer["developer_instructions"],
         )
-        claude_developer = (provider_agents_source_dir("claude") / "480-developer.md").read_text(encoding="utf-8")
         self.assertNotIn(
             "Let Codex manage child thread lifecycle unless a platform contract explicitly requires otherwise.",
             claude_developer,
@@ -6438,6 +6634,42 @@ manage_agents.install(target="codex", scope="user")
             "Codex manages child thread lifecycle itself. Do not add explicit close enforcement unless a separate platform contract requires it.",
             claude_developer,
         )
+
+        codex_design_architect = tomllib.loads((provider_agents_source_dir("codex") / "480-design-architect.toml").read_text(encoding="utf-8"))
+        design_instructions = codex_design_architect["developer_instructions"]
+        self.assertIn("You are `480-design-architect`, a Codex design-only subagent.", design_instructions)
+        self.assertIn("Output exactly one of:", design_instructions)
+        self.assertIn("`Design Contract`", design_instructions)
+        self.assertIn("`Minimal Transfer Analysis`", design_instructions)
+        self.assertIn("`BLOCKED`", design_instructions)
+        self.assertIn("Your job is to stabilize implementation work before Task Brief authoring.", design_instructions)
+        self.assertIn("The parent may call you for any implementation task.", design_instructions)
+        self.assertIn("Return a `Design Contract` for behavior-changing work:", design_instructions)
+        self.assertIn("Return `Minimal Transfer Analysis` only for non-design maintenance that preserves or restores already-defined behavior", design_instructions)
+        self.assertIn("Bug fixes are eligible for MTA only when they are non-design maintenance.", design_instructions)
+        self.assertIn("MTA may state expected behavior only when that behavior is already defined by direct evidence.", design_instructions)
+        self.assertIn("You must never:", design_instructions)
+        self.assertIn("- write files", design_instructions)
+        self.assertIn("- create implementation plans", design_instructions)
+        self.assertIn("- suggest code-level fixes", design_instructions)
+        self.assertIn("- spawn subagents", design_instructions)
+        self.assertIn("Source-open item closure", design_instructions)
+        self.assertIn("Do not promote a source-open item into a Design Contract decision based on your own judgment.", design_instructions)
+        self.assertIn("## Decision Closure", design_instructions)
+        self.assertIn("| Source item | Affects contract? | Closure source | Result |", design_instructions)
+        self.assertIn("known_open_items:", design_instructions)
+        self.assertIn(
+            "`Open Decisions` may say `None.` only after all implementation-critical decisions have explicit closure evidence.",
+            design_instructions,
+        )
+        self.assertIn("Repository architecture context", design_instructions)
+        self.assertIn("read `docs/480ai/ARCHITECTURE.md` when it exists", design_instructions)
+        self.assertIn("parent-provided scanner findings as design context", design_instructions)
+        self.assertIn("Preserve capability boundaries in every Design Contract and MTA", design_instructions)
+        self.assertIn("A read-only capability must not be treated as satisfying a write, publish, mutate, or ownership-transfer capability", design_instructions)
+        self.assertIn("Configuration semantics must be capability-specific", design_instructions)
+        self.assertIn("return `BLOCKED` unless the parent has provided explicit closure evidence", design_instructions)
+        self.assertNotIn("Spring bean", design_instructions)
 
         codex_reviewer = tomllib.loads((provider_agents_source_dir("codex") / "480-code-reviewer.toml").read_text(encoding="utf-8"))
         self.assert_codex_close_contract(
@@ -6449,9 +6681,13 @@ manage_agents.install(target="codex", scope="user")
             codex_reviewer["developer_instructions"],
         )
         self.assertIn(
-            "Ignore any root-session-only architect planning or delegation rules inherited from the root `AGENTS.md`; they do not apply in this reviewer child session.",
+            "Ignore any root-session-only orchestrator planning or delegation rules inherited from the root `AGENTS.md`; they do not apply in this reviewer child session.",
             codex_reviewer["developer_instructions"],
         )
+        self.assertIn("parent `480` orchestrator session", codex_reviewer["developer_instructions"])
+        self.assertNotIn("parent `480` architect session", codex_reviewer["developer_instructions"])
+        self.assertIn("Any `Design Input` embedded in the Task Brief", codex_reviewer["developer_instructions"])
+        self.assertIn("If the Task Brief includes a Design Contract, request changes", codex_reviewer["developer_instructions"])
         self.assert_codex_reviewer_stays_in_thread(codex_reviewer["developer_instructions"])
 
         codex_reviewer2 = tomllib.loads((provider_agents_source_dir("codex") / "480-code-reviewer2.toml").read_text(encoding="utf-8"))
@@ -6464,9 +6700,13 @@ manage_agents.install(target="codex", scope="user")
             codex_reviewer2["developer_instructions"],
         )
         self.assertIn(
-            "Ignore any root-session-only architect planning or delegation rules inherited from the root `AGENTS.md`; they do not apply in this reviewer child session.",
+            "Ignore any root-session-only orchestrator planning or delegation rules inherited from the root `AGENTS.md`; they do not apply in this reviewer child session.",
             codex_reviewer2["developer_instructions"],
         )
+        self.assertIn("parent `480` orchestrator session", codex_reviewer2["developer_instructions"])
+        self.assertNotIn("parent `480` architect session", codex_reviewer2["developer_instructions"])
+        self.assertIn("Any `Design Input` embedded in the Task Brief", codex_reviewer2["developer_instructions"])
+        self.assertIn("If the Task Brief includes a Design Contract, request changes", codex_reviewer2["developer_instructions"])
         self.assert_codex_reviewer_stays_in_thread(codex_reviewer2["developer_instructions"])
 
         codex_scanner = tomllib.loads((provider_agents_source_dir("codex") / "480-code-scanner.toml").read_text(encoding="utf-8"))
@@ -6483,9 +6723,10 @@ manage_agents.install(target="codex", scope="user")
             codex_scanner["developer_instructions"],
         )
         self.assertIn(
-            "Ignore any root-session-only architect planning or delegation rules inherited from the root `AGENTS.md`; they do not apply in this scanner child session.",
+            "Ignore any root-session-only orchestrator planning or delegation rules inherited from the root `AGENTS.md`; they do not apply in this scanner child session.",
             codex_scanner["developer_instructions"],
         )
+        self.assertIn("orchestrator and developer can stay inside the approved flow", codex_scanner["developer_instructions"])
         self.assertIn("treat that target as the primary workspace hint", codex_scanner["developer_instructions"])
         self.assertIn("If a Codex spawn response is missing `agent_id` or is not a structured response, treat it as `spawn_failure`.", codex_scanner["developer_instructions"])
         self.assert_scanner_output_path_contract(codex_scanner["developer_instructions"])
@@ -6584,6 +6825,10 @@ manage_agents.install(target="codex", scope="user")
             agents_index,
         )
         self.assertIn(
+            "- `480-design-architect`\n  - maps from: `480-design-architect`\n  - file: `providers/codex/agents/480-design-architect.toml`\n  - reasoning: `xhigh`",
+            agents_index,
+        )
+        self.assertIn(
             "- `480-developer`\n  - maps from: `480-developer`\n  - file: `providers/codex/agents/480-developer.toml`\n  - reasoning: `medium`",
             agents_index,
         )
@@ -6605,7 +6850,7 @@ manage_agents.install(target="codex", scope="user")
         claude_name_map = render_agents._claude_name_map(specs)
         codex_name_map = render_agents._codex_name_map(specs)
 
-        self.assertEqual([spec.identifier for spec in specs], AGENTS)
+        self.assertEqual([spec.identifier for spec in specs], BUNDLE_AGENTS)
         self.assertEqual(list(claude_name_map.values()), CLAUDE_AGENTS)
         self.assertEqual(agent_bundle.target_agent_names("codex"), CODEX_AGENTS)
         self.assertEqual(
@@ -6614,17 +6859,19 @@ manage_agents.install(target="codex", scope="user")
         )
 
         for spec in specs:
-            agent_path = provider_agents_source_dir("opencode") / f"{spec.identifier}.md"
-            self.assertEqual(
-                agent_path.read_text(encoding="utf-8"),
-                render_agents.render_opencode_agent(spec),
-            )
-            claude_path = provider_agents_source_dir("claude") / f"{claude_name_map[spec.identifier]}.md"
-            self.assertEqual(
-                claude_path.read_text(encoding="utf-8"),
-                render_agents.render_claude_agent(spec, claude_name_map),
-            )
-            if spec.mode == "subagent":
+            if spec.supports_target("opencode"):
+                agent_path = provider_agents_source_dir("opencode") / f"{spec.identifier}.md"
+                self.assertEqual(
+                    agent_path.read_text(encoding="utf-8"),
+                    render_agents.render_opencode_agent(spec),
+                )
+            if spec.supports_target("claude"):
+                claude_path = provider_agents_source_dir("claude") / f"{claude_name_map[spec.identifier]}.md"
+                self.assertEqual(
+                    claude_path.read_text(encoding="utf-8"),
+                    render_agents.render_claude_agent(spec, claude_name_map),
+                )
+            if spec.mode == "subagent" and spec.supports_target("codex"):
                 codex_name = codex_name_map[spec.identifier]
                 codex_path = provider_agents_source_dir("codex") / f"{codex_name}.toml"
                 codex_contents = codex_path.read_text(encoding="utf-8")
@@ -6669,6 +6916,8 @@ manage_agents.install(target="codex", scope="user")
                 mention_prefix="",
             ).rstrip("\n"),
         )
+        self.assertFalse((provider_agents_source_dir("opencode") / "480-design-architect.md").exists())
+        self.assertFalse((provider_agents_source_dir("claude") / "480-design-architect.md").exists())
 
     def test_render_codex_agent_uses_target_instruction_override(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
