@@ -30,6 +30,8 @@ The state-machine reference is treated as a behavioral reference, not as a runti
 
 Reviewer subagents are not modeled as separate states. Instead, they are the verification gate inside `IMPLEMENTING`.
 
+The root orchestrator also owns a Review Escalation Gate before any reviewer-requested retry goes back to `480-developer`. The gate classifies review outcomes as `within_scope` or one of four escalation axes: `[contract_semantics]`, `[risk_class]`, `[scope_surface]`, `[global_change]`.
+
 ## Reviewer Integration
 
 For the root orchestrator, `IMPLEMENTING` means enforcing the approved execution contract through:
@@ -51,6 +53,32 @@ Normal completion requires:
 
 If the existing low-risk reviewer-infrastructure fallback is used, the orchestrator's independent diff review must find no required changes before final delivery.
 
+## Review Escalation Gate
+
+Before sending any reviewer-requested retry back to `480-developer`, the root orchestrator classifies the review outcome for that Task Brief as `within_scope` or one of `[contract_semantics]`, `[risk_class]`, `[scope_surface]`, or `[global_change]`.
+
+Only `within_scope` findings go back to `480-developer`.
+
+Immediate pause triggers include:
+
+- public-contract reinterpretation
+- exact schema/runtime-equivalence or invariant/failure-semantics decisions not already closed in the Task Brief or Design Input
+- new risk classes such as precision, overflow, DoS, security, or performance hardening outside the approved scope
+- dependency/global-config/refactor requirements beyond the local fix
+
+The root tracks escalation history per Task Brief. If the same escalation axis appears again after one developer retry, the orchestrator stops the loop, moves back to `PLANNED` or `BLOCKED`, and asks the user for review instead of continuing reviewer/developer churn.
+
+Pause reports to the user include:
+
+- the current approved scope
+- the new reviewer concern
+- why it exceeds scope
+- the recommended default `stay with the approved minimal fix`
+- the alternate `expand scope and re-plan`
+- the single decision needed to continue
+
+Reviewers and `480-developer` emit structured escalation signals only. The root orchestrator remains the sole owner of pause, re-plan, and user-review transitions.
+
 ## State Handling
 
 The root orchestrator interprets the states as action constraints:
@@ -63,7 +91,7 @@ The root orchestrator interprets the states as action constraints:
 - `DONE`: implementation and review are complete, child lifecycle work is closed, and no follow-up remains.
 - `BLOCKED`: exactly one missing decision, contract violation, or unresolved infrastructure blocker prevents progress.
 
-Review findings inside the approved scope keep the workflow in `IMPLEMENTING`. Review findings that require new product intent, behavior design, scope expansion, or other execution decisions move the workflow back to `PLANNED` or `BLOCKED`.
+Review findings inside the approved scope keep the workflow in `IMPLEMENTING` only when the Review Escalation Gate classifies them as `within_scope`. Review findings classified to an escalation axis move the workflow back to `PLANNED` or `BLOCKED`.
 
 Reviewer infrastructure blockers follow the existing retry and low-risk fallback rules. They never count as reviewer approval.
 
@@ -84,6 +112,7 @@ The implementation is covered by installation and rendering tests that verify:
 
 - Codex managed guidance includes the root state-machine rules.
 - Codex rendered documentation explains that reviewers are the verification gate inside `IMPLEMENTING`.
+- Codex managed guidance and rendered docs describe the Review Escalation Gate, the four escalation axes, and the repeated-axis stop rule.
 - `DONE` requires dual reviewer approval and child lifecycle completion.
 - Reviewer infrastructure blockers do not count as approval.
 - Checked-in rendered artifacts remain in sync with the instruction sources.

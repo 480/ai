@@ -79,9 +79,21 @@ Codex install/uninstall also clean up legacy `480-architect.toml` and `480.toml`
 - Design Contract or Minimal Transfer Analysis output is embedded into every implementation Task Brief under `Design Input`; v1 does not create separate design artifact files.
 - Root state machine: reviewer subagents are the verification gate inside `IMPLEMENTING`, not separate states.
 - Developer completion alone does not satisfy `DONE`; normal completion requires both `480-code-reviewer` and `480-code-reviewer2` to approve with exactly `Approved.`, required child sessions to be closed, and no follow-up, retry, or result wait to remain.
-- Review findings inside approved scope keep the workflow in `IMPLEMENTING`; findings that require new product intent, behavior design, scope expansion, or other execution decisions move the workflow back to `PLANNED` or `BLOCKED`.
+- Review findings inside approved scope keep the workflow in `IMPLEMENTING` only when the Review Escalation Gate classifies them as `within_scope`; findings classified to an escalation axis move the workflow back to `PLANNED` or `BLOCKED`.
 - Reviewer infrastructure blockers follow the existing retry and low-risk fallback rules and never count as reviewer approval.
 - The default reviewer flow is parallel: call `480-code-reviewer` and `480-code-reviewer2` together.
+
+## Review Escalation Gate
+
+- Before sending any reviewer-requested retry back to `480-developer`, the root runs a Review Escalation Gate that classifies the outcome for that Task Brief as `within_scope` or one of `[contract_semantics]`, `[risk_class]`, `[scope_surface]`, or `[global_change]`.
+- Only `within_scope` findings go back to `480-developer`; pause-worthy findings stay owned by the root orchestrator.
+- Immediate pause triggers include public-contract reinterpretation, exact schema/runtime-equivalence or invariant/failure-semantics decisions not already closed in the Task Brief or Design Input, new risk classes such as precision, overflow, DoS, security, or performance hardening outside the approved scope, and dependency/global-config/refactor requirements beyond the local fix.
+- Track escalation history per Task Brief. If the same escalation axis appears again after one developer retry, stop the loop, move back to `PLANNED` or `BLOCKED`, and ask the user for review instead of continuing reviewer/developer churn.
+- Pause reports to the user include the current approved scope, the new reviewer concern, why it exceeds scope, the recommended default `stay with the approved minimal fix`, the alternate `expand scope and re-plan`, and the single decision needed to continue.
+- The root orchestrator is the only role that may pause, re-plan, or ask the user for review. Reviewers and `480-developer` emit structured escalation signals only.
+
+## Review Loop Details
+
 - If `480-code-reviewer2` returns a delegation infrastructure blocker, do not re-request `480-code-reviewer`; wait for `480-code-reviewer` to finish if it is still pending, then retry `480-code-reviewer2` alone exactly once before surfacing the blocker upstream.
 - Reviewers review in-thread. `480-code-reviewer` and `480-code-reviewer2` do not spawn additional subagents.
 - Keep the concurrent agent budget narrow. Outside the review step, the default path activates only one child agent at a time.

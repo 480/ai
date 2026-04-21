@@ -344,6 +344,37 @@ class InstallationTests(unittest.TestCase):
         self.assertIn("`reason: <short reason>`", text)
         self.assertIn("`attempts: <number>`", text)
         self.assertIn("`evidence: <short evidence>`", text)
+        self.assert_codex_reviewer_pause_contract(text)
+
+    def assert_codex_reviewer_pause_contract(self, text: str) -> None:
+        self.assertIn(
+            "If you identify an issue that requires architectural changes, scope expansion, or decisions beyond the Task Brief, do not ask the developer to solve it unilaterally.",
+            text,
+        )
+        self.assertIn(
+            "If a concern is beyond the Task Brief or hits a hard-boundary trigger, stop the normal review loop and return the single pause/escalation bullet instead of stacking more requests.",
+            text,
+        )
+        self.assertIn(
+            "Pause and escalate to the parent `480` session before more code changes.",
+            text,
+        )
+        self.assertIn(
+            "`Why:` must begin with one of `[contract_semantics]`, `[risk_class]`, `[scope_surface]`, or `[global_change]`, followed by the concrete reason.",
+            text,
+        )
+        self.assertIn("public-contract reinterpretation", text)
+        self.assertIn("exact schema/runtime-equivalence or invariant/failure-semantics decisions", text)
+        self.assertIn("precision, overflow, DoS, security, or performance hardening", text)
+        self.assertIn("dependency/global-config/refactor requirements beyond the local fix", text)
+        self.assertIn(
+            "Do not stack downstream hardening requests behind a pause-worthy concern.",
+            text,
+        )
+        self.assertIn(
+            "Once such a concern exists, escalate instead of iteratively broadening the implementation.",
+            text,
+        )
 
     def assert_reviewer_throughput_contract(self, text: str) -> None:
         self.assertIn("The user's time is expensive.", text)
@@ -439,6 +470,56 @@ class InstallationTests(unittest.TestCase):
         )
         self.assertIn("Iterate until BOTH reviewers approve with the explicit `Approved.` approval string.", text)
         self.assertNotIn("Any reviewer response without change requests counts as approval.", text)
+
+    def assert_codex_developer_review_escalation_contract(self, text: str) -> None:
+        self.assertIn(
+            "If the parent sends review-driven follow-up that conflicts with the Task Brief or Design Input, materially expands scope, or falls into a hard-boundary escalation axis",
+            text,
+        )
+        for axis in ("`[contract_semantics]`", "`[risk_class]`", "`[scope_surface]`", "`[global_change]`"):
+            self.assertIn(axis, text)
+        self.assertTrue(
+            "return `BLOCKED` to the parent instead of implementing it unilaterally." in text
+            or "the developer returns `BLOCKED` to the parent instead of implementing it unilaterally." in text
+        )
+        self.assertIn(
+            "MTA-backed minimal maintenance remains local unless the parent explicitly re-approves broader contract or risk-hardening work.",
+            text,
+        )
+
+    def assert_codex_review_escalation_gate_contract(self, text: str) -> None:
+        self.assertIn("Review Escalation Gate", text)
+        self.assertIn(
+            "Before sending any reviewer-requested retry back to `480-developer`",
+            text,
+        )
+        self.assertIn("`within_scope`", text)
+        for axis in ("`[contract_semantics]`", "`[risk_class]`", "`[scope_surface]`", "`[global_change]`"):
+            self.assertIn(axis, text)
+        self.assertIn("public-contract reinterpretation", text)
+        self.assertIn(
+            "exact schema/runtime-equivalence or invariant/failure-semantics decisions not already closed in the Task Brief or Design Input",
+            text,
+        )
+        self.assertIn(
+            "new risk classes such as precision, overflow, DoS, security, or performance hardening outside the approved scope",
+            text,
+        )
+        self.assertIn("dependency/global-config/refactor requirements beyond the local fix", text)
+        self.assertIn("escalation history per Task Brief", text)
+        self.assertIn("If the same escalation axis appears again after one developer retry", text)
+        self.assertIn("move the workflow back to `PLANNED` or `BLOCKED`", text)
+        self.assertIn("the user for review instead of continuing reviewer/developer churn", text)
+        self.assertTrue(
+            "The root orchestrator is the only role that may pause, re-plan, or ask the user for review." in text
+            or "The root orchestrator remains the sole owner of pause, re-plan, and user-review transitions." in text
+        )
+        self.assertIn("the current approved scope", text)
+        self.assertIn("the new reviewer concern", text)
+        self.assertIn("why it exceeds scope", text)
+        self.assertIn("the recommended default `stay with the approved minimal fix`", text)
+        self.assertIn("the alternate `expand scope and re-plan`", text)
+        self.assertIn("the single decision needed to continue", text)
 
     def assert_architect_autopilot_worktree_contract(self, text: str) -> None:
         self.assertIn(
@@ -6416,8 +6497,9 @@ manage_agents.install(target="codex", scope="user")
         self.assertIn("Developer completion alone does not satisfy `DONE`", codex_index)
         self.assertIn("normal completion requires both `480-code-reviewer` and `480-code-reviewer2` to approve with exactly `Approved.`", codex_index)
         self.assertIn("Review findings inside approved scope keep the workflow in `IMPLEMENTING`", codex_index)
-        self.assertIn("findings that require new product intent, behavior design, scope expansion, or other execution decisions move the workflow back to `PLANNED` or `BLOCKED`", codex_index)
+        self.assertIn("findings classified to an escalation axis move the workflow back to `PLANNED` or `BLOCKED`", codex_index)
         self.assertIn("Reviewer infrastructure blockers follow the existing retry and low-risk fallback rules and never count as reviewer approval.", codex_index)
+        self.assert_codex_review_escalation_gate_contract(codex_index)
         self.assert_codex_lifecycle_contract(
             codex_index,
             ownership_line="The current parent session owns each child lifecycle end-to-end: spawn, follow-up, retry, result collection, wait, and explicit close.",
@@ -6527,6 +6609,8 @@ manage_agents.install(target="codex", scope="user")
         self.assertIn("Review findings inside the approved scope keep the workflow in `IMPLEMENTING`", codex_managed_guidance)
         self.assertIn("Reviewer infrastructure blockers follow the existing retry and low-risk fallback rules. An infrastructure blocker never counts as reviewer approval.", codex_managed_guidance)
         self.assertIn("both `480-code-reviewer` and `480-code-reviewer2` approve with exactly `Approved.`", codex_managed_guidance)
+        self.assert_codex_review_escalation_gate_contract(codex_architect)
+        self.assert_codex_review_escalation_gate_contract(codex_managed_guidance)
         self.assertIn(
             "The parent session owns each child lifecycle end-to-end: spawn, follow-up, retry, result collection, wait, and explicit close.",
             codex_managed_guidance,
@@ -6594,9 +6678,13 @@ manage_agents.install(target="codex", scope="user")
             (REPO_ROOT / "providers" / "codex" / "instructions" / "480-developer.md").read_text(encoding="utf-8"),
             codex_style=True,
         )
+        self.assert_codex_developer_review_escalation_contract(
+            (REPO_ROOT / "providers" / "codex" / "instructions" / "480-developer.md").read_text(encoding="utf-8")
+        )
 
         codex_developer = tomllib.loads((provider_agents_source_dir("codex") / "480-developer.toml").read_text(encoding="utf-8"))
         self.assert_developer_role_identity_contract(codex_developer["developer_instructions"], codex_style=True)
+        self.assert_codex_developer_review_escalation_contract(codex_developer["developer_instructions"])
         self.assertIn("Codex delegation safety", codex_developer["developer_instructions"])
         self.assertIn("You are a Codex implementation agent. Produce deterministic implementation changes for exactly one approved Task Brief.", codex_developer["developer_instructions"])
         self.assertIn("Normal Codex implementation Task Briefs are expected to include `Design Input` from `480-design-architect`.", codex_developer["developer_instructions"])
@@ -6670,6 +6758,27 @@ manage_agents.install(target="codex", scope="user")
         self.assertIn("Configuration semantics must be capability-specific", design_instructions)
         self.assertIn("return `BLOCKED` unless the parent has provided explicit closure evidence", design_instructions)
         self.assertNotIn("Spring bean", design_instructions)
+
+    def test_codex_alignment_docs_cover_review_escalation_gate_contract(self) -> None:
+        orchestrator_alignment = (REPO_ROOT / "docs" / "codex-orchestrator-state-machine-alignment.md").read_text(
+            encoding="utf-8"
+        )
+        developer_alignment = (
+            REPO_ROOT / "docs" / "codex-developer-semantic-preservation-alignment.md"
+        ).read_text(encoding="utf-8")
+        b_lite_alignment = (REPO_ROOT / "docs" / "codex-b-lite-conditional-architect.md").read_text(
+            encoding="utf-8"
+        )
+
+        self.assert_codex_review_escalation_gate_contract(orchestrator_alignment)
+        self.assert_codex_developer_review_escalation_contract(developer_alignment)
+        self.assertIn("three response shapes", b_lite_alignment)
+        self.assertIn("Pause and escalate to the parent `480` session before more code changes.", b_lite_alignment)
+        self.assertIn("`[contract_semantics]`, `[risk_class]`, `[scope_surface]`, `[global_change]`", b_lite_alignment)
+        self.assertIn("The root orchestrator owns the Review Escalation Gate", b_lite_alignment)
+        self.assertIn("If the same escalation axis appears again after one developer retry", b_lite_alignment)
+        self.assertIn("stay with the approved minimal fix", b_lite_alignment)
+        self.assertIn("expand scope and re-plan", b_lite_alignment)
 
         codex_reviewer = tomllib.loads((provider_agents_source_dir("codex") / "480-code-reviewer.toml").read_text(encoding="utf-8"))
         self.assert_codex_close_contract(
