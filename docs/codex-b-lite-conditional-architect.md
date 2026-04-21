@@ -115,21 +115,21 @@ The name `Minimal Transfer Analysis` is descriptive for this role as long as "mi
 
 `480-developer` treats the Task Brief as the execution request. If the Task Brief includes a Design Contract, the developer treats it as the authoritative behavior contract. If the Task Brief includes an MTA, the developer treats it as context only.
 
-If the parent sends review-driven follow-up that conflicts with the Task Brief or Design Input, materially expands scope, or falls into a hard-boundary escalation axis (`[contract_semantics]`, `[risk_class]`, `[scope_surface]`, `[global_change]`), the developer returns `BLOCKED` to the parent instead of implementing it unilaterally.
+If the parent sends review-driven follow-up that conflicts with the Task Brief or Design Input, or requires a new decision or new behavior authority to proceed safely, the developer returns `BLOCKED` to the parent instead of implementing it unilaterally.
+
+An axis-tagged review request is not by itself a blocker on first appearance. The developer may absorb one retry when the requested changes can still be implemented safely within the approved behavior authority.
 
 MTA-backed minimal maintenance remains local unless the parent explicitly re-approves broader contract or risk-hardening work.
 
 Reviewers check implementation against the Task Brief and any embedded Design Input. Design Contract violations are required changes.
 
-Reviewers preserve the existing three response shapes. When a finding is beyond the Task Brief or hits a hard-boundary trigger, they return exactly one change-request bullet using:
+Reviewers preserve the existing three response shapes. When a finding is beyond the Task Brief or suggests contract, risk, scope-surface, or global expansion, they still return ordinary change-request bullets.
 
-- ``What: Pause and escalate to the parent `480` session before more code changes.``
-- `Why:` beginning with exactly one escalation axis: `[contract_semantics]`, `[risk_class]`, `[scope_surface]`, or `[global_change]`
-- `Where:` pointing at the affected contract area or changed path
+When a change request signals a Codex escalation axis, reviewers keep the normal change-request bullet shape and begin `Why:` with exactly one of `[contract_semantics]`, `[risk_class]`, `[scope_surface]`, or `[global_change]`.
 
-Once such a pause-worthy concern exists, reviewers do not stack downstream hardening requests behind it. They escalate instead of iteratively broadening the implementation.
+Reviewers do not stack downstream hardening or broadening requests behind an axis-tagged concern. They return only the concrete changes needed for the current retry.
 
-The root orchestrator owns the Review Escalation Gate and classifies review outcomes as `within_scope` or one escalation axis before any retry goes back to `480-developer`. If the same escalation axis appears again after one developer retry, the root stops the loop, moves back to `PLANNED` or `BLOCKED`, and asks the user whether to stay with the approved minimal fix or expand scope and re-plan.
+The root orchestrator owns the Review Escalation Gate and classifies review outcomes as `within_scope` or one escalation axis before any retry goes back to `480-developer`. On the first axis-tagged finding for a Task Brief, the root records the axis and allows one retry. If the same escalation axis appears again after one developer retry, the root stops the loop, moves back to `PLANNED` or `BLOCKED`, and asks the user whether to stay with the approved minimal fix or expand scope and re-plan.
 
 ## Non-goals
 
@@ -153,6 +153,6 @@ The implementation is covered by installation and rendering tests that verify:
 - The orchestrator does not author design artifacts.
 - The design architect instruction enforces the Design Contract, MTA, and BLOCKED output boundary.
 - Developer and reviewer instructions handle Design Contract and MTA semantics.
-- Codex reviewer guidance preserves the three response shapes while adding the pause/escalation bullet convention.
-- The root orchestrator owns the Review Escalation Gate and repeated-axis stop rule.
+- Codex reviewer guidance preserves the three response shapes while adding axis-tagged `Why:` telemetry inside normal change-request bullets.
+- The root orchestrator owns the Review Escalation Gate, the retry-first axis telemetry rule, and the repeated-axis stop rule.
 - Checked-in rendered artifacts remain in sync with the bundle definitions.

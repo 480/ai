@@ -57,14 +57,11 @@ If the existing low-risk reviewer-infrastructure fallback is used, the orchestra
 
 Before sending any reviewer-requested retry back to `480-developer`, the root orchestrator classifies the review outcome for that Task Brief as `within_scope` or one of `[contract_semantics]`, `[risk_class]`, `[scope_surface]`, or `[global_change]`.
 
-Only `within_scope` findings go back to `480-developer`.
+`within_scope` remains the baseline classification for ordinary in-scope retries.
 
-Immediate pause triggers include:
+Axis classification is loop telemetry and a retry guard, not an immediate stop condition on first appearance.
 
-- public-contract reinterpretation
-- exact schema/runtime-equivalence or invariant/failure-semantics decisions not already closed in the Task Brief or Design Input
-- new risk classes such as precision, overflow, DoS, security, or performance hardening outside the approved scope
-- dependency/global-config/refactor requirements beyond the local fix
+On the first axis-tagged finding for a Task Brief, the root records the escalation axis and allows one developer retry to absorb the review-driven follow-up.
 
 The root tracks escalation history per Task Brief. If the same escalation axis appears again after one developer retry, the orchestrator stops the loop, moves back to `PLANNED` or `BLOCKED`, and asks the user for review instead of continuing reviewer/developer churn.
 
@@ -91,7 +88,7 @@ The root orchestrator interprets the states as action constraints:
 - `DONE`: implementation and review are complete, child lifecycle work is closed, and no follow-up remains.
 - `BLOCKED`: exactly one missing decision, contract violation, or unresolved infrastructure blocker prevents progress.
 
-Review findings inside the approved scope keep the workflow in `IMPLEMENTING` only when the Review Escalation Gate classifies them as `within_scope`. Review findings classified to an escalation axis move the workflow back to `PLANNED` or `BLOCKED`.
+Review findings inside the approved scope keep the workflow in `IMPLEMENTING` when the Review Escalation Gate classifies them as `within_scope`. Review findings classified to an escalation axis remain in `IMPLEMENTING` on first appearance as loop telemetry and a retry guard, and move the workflow back to `PLANNED` or `BLOCKED` only if the same axis appears again after one developer retry.
 
 Reviewer infrastructure blockers follow the existing retry and low-risk fallback rules. They never count as reviewer approval.
 
@@ -112,7 +109,7 @@ The implementation is covered by installation and rendering tests that verify:
 
 - Codex managed guidance includes the root state-machine rules.
 - Codex rendered documentation explains that reviewers are the verification gate inside `IMPLEMENTING`.
-- Codex managed guidance and rendered docs describe the Review Escalation Gate, the four escalation axes, and the repeated-axis stop rule.
+- Codex managed guidance and rendered docs describe the Review Escalation Gate, the four escalation axes, the retry-first axis telemetry rule, and the repeated-axis stop rule.
 - `DONE` requires dual reviewer approval and child lifecycle completion.
 - Reviewer infrastructure blockers do not count as approval.
 - Checked-in rendered artifacts remain in sync with the instruction sources.

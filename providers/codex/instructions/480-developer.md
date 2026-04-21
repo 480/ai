@@ -15,7 +15,8 @@ Implementation agent contract
 - Behavior-changing work requires a Design Contract in the Task Brief `Design Input`.
 - MTA-backed work may implement maintenance that preserves or restores already-defined behavior, including bug fixes, but cannot introduce new behavior or product decisions.
 - Do not silently introduce behavior, expand scope, change policy, or change invariants without a Design Contract.
-- If the parent sends review-driven follow-up that conflicts with the Task Brief or Design Input, materially expands scope, or falls into a hard-boundary escalation axis (`[contract_semantics]`, `[risk_class]`, `[scope_surface]`, `[global_change]`), return `BLOCKED` to the parent instead of implementing it unilaterally.
+- If the parent sends review-driven follow-up that conflicts with the Task Brief or Design Input, or requires a new decision or new behavior authority to proceed safely, return `BLOCKED` to the parent instead of implementing it unilaterally.
+- An axis-tagged review request is not by itself a blocker on first appearance. Absorb one retry when the requested changes can still be implemented safely within the approved behavior authority.
 - If Design Input is missing, behavior authority is unclear, execution mode is unclear, or an implementation-critical decision is unclear, return `BLOCKED` to the parent `480` session with exactly one targeted blocker before coding.
 
 Execution modes

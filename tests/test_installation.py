@@ -348,33 +348,33 @@ class InstallationTests(unittest.TestCase):
 
     def assert_codex_reviewer_pause_contract(self, text: str) -> None:
         self.assertIn(
-            "If you identify an issue that requires architectural changes, scope expansion, or decisions beyond the Task Brief, do not ask the developer to solve it unilaterally.",
+            "If you identify an issue that requires architectural changes, scope expansion, or decisions beyond the Task Brief, keep the normal change-request bullet shape and prefix `Why:` with the appropriate escalation axis tag when needed",
             text,
         )
         self.assertIn(
-            "If a concern is beyond the Task Brief or hits a hard-boundary trigger, stop the normal review loop and return the single pause/escalation bullet instead of stacking more requests.",
+            "If a concern is beyond the Task Brief or indicates contract, risk, scope-surface, or global-change expansion, keep returning normal change-request bullets",
             text,
         )
         self.assertIn(
-            "Pause and escalate to the parent `480` session before more code changes.",
+            "When a change request signals a Codex escalation axis, keep the normal change-request bullet shape",
             text,
         )
-        self.assertIn(
-            "`Why:` must begin with one of `[contract_semantics]`, `[risk_class]`, `[scope_surface]`, or `[global_change]`, followed by the concrete reason.",
-            text,
-        )
+        for axis in ("`[contract_semantics]`", "`[risk_class]`", "`[scope_surface]`", "`[global_change]`"):
+            self.assertIn(axis, text)
         self.assertIn("public-contract reinterpretation", text)
-        self.assertIn("exact schema/runtime-equivalence or invariant/failure-semantics decisions", text)
+        self.assertIn("exact schema/runtime-equivalence, invariant, or failure-semantics decisions", text)
         self.assertIn("precision, overflow, DoS, security, or performance hardening", text)
-        self.assertIn("dependency/global-config/refactor requirements beyond the local fix", text)
+        self.assertIn("dependency, shared/global-config, or refactor requirements", text)
         self.assertIn(
-            "Do not stack downstream hardening requests behind a pause-worthy concern.",
+            "Do not stack downstream hardening or broadening requests behind an axis-tagged concern.",
             text,
         )
         self.assertIn(
-            "Once such a concern exists, escalate instead of iteratively broadening the implementation.",
+            "Return only the concrete changes needed for the current retry.",
             text,
         )
+        self.assertNotIn("Pause and escalate to the parent `480` session before more code changes.", text)
+        self.assertNotIn("hard-boundary triggers include", text)
 
     def assert_reviewer_throughput_contract(self, text: str) -> None:
         self.assertIn("The user's time is expensive.", text)
@@ -473,19 +473,26 @@ class InstallationTests(unittest.TestCase):
 
     def assert_codex_developer_review_escalation_contract(self, text: str) -> None:
         self.assertIn(
-            "If the parent sends review-driven follow-up that conflicts with the Task Brief or Design Input, materially expands scope, or falls into a hard-boundary escalation axis",
+            "If the parent sends review-driven follow-up that conflicts with the Task Brief or Design Input, or requires a new decision or new behavior authority to proceed safely",
             text,
         )
-        for axis in ("`[contract_semantics]`", "`[risk_class]`", "`[scope_surface]`", "`[global_change]`"):
-            self.assertIn(axis, text)
         self.assertTrue(
             "return `BLOCKED` to the parent instead of implementing it unilaterally." in text
             or "the developer returns `BLOCKED` to the parent instead of implementing it unilaterally." in text
         )
         self.assertIn(
+            "An axis-tagged review request is not by itself a blocker on first appearance.",
+            text,
+        )
+        self.assertTrue(
+            "Absorb one retry when the requested changes can still be implemented safely within the approved behavior authority." in text
+            or "The developer may absorb one retry when the requested changes can still be implemented safely within the approved behavior authority." in text
+        )
+        self.assertIn(
             "MTA-backed minimal maintenance remains local unless the parent explicitly re-approves broader contract or risk-hardening work.",
             text,
         )
+        self.assertNotIn("hard-boundary escalation axis", text)
 
     def assert_codex_review_escalation_gate_contract(self, text: str) -> None:
         self.assertIn("Review Escalation Gate", text)
@@ -496,16 +503,14 @@ class InstallationTests(unittest.TestCase):
         self.assertIn("`within_scope`", text)
         for axis in ("`[contract_semantics]`", "`[risk_class]`", "`[scope_surface]`", "`[global_change]`"):
             self.assertIn(axis, text)
-        self.assertIn("public-contract reinterpretation", text)
         self.assertIn(
-            "exact schema/runtime-equivalence or invariant/failure-semantics decisions not already closed in the Task Brief or Design Input",
+            "Axis classification is loop telemetry and a retry guard, not an immediate stop condition on first appearance.",
             text,
         )
-        self.assertIn(
-            "new risk classes such as precision, overflow, DoS, security, or performance hardening outside the approved scope",
-            text,
+        self.assertTrue(
+            "On the first axis-tagged finding for a Task Brief, the root records the escalation axis and allows one developer retry to absorb the review-driven follow-up." in text
+            or "On the first axis-tagged finding for a Task Brief, record the escalation axis and allow one developer retry to absorb the review-driven follow-up." in text
         )
-        self.assertIn("dependency/global-config/refactor requirements beyond the local fix", text)
         self.assertIn("escalation history per Task Brief", text)
         self.assertIn("If the same escalation axis appears again after one developer retry", text)
         self.assertIn("move the workflow back to `PLANNED` or `BLOCKED`", text)
@@ -520,6 +525,8 @@ class InstallationTests(unittest.TestCase):
         self.assertIn("the recommended default `stay with the approved minimal fix`", text)
         self.assertIn("the alternate `expand scope and re-plan`", text)
         self.assertIn("the single decision needed to continue", text)
+        self.assertNotIn("Immediate pause triggers include", text)
+        self.assertNotIn("Only `within_scope` findings go back to `480-developer`", text)
 
     def assert_architect_autopilot_worktree_contract(self, text: str) -> None:
         self.assertIn(
@@ -6497,7 +6504,7 @@ manage_agents.install(target="codex", scope="user")
         self.assertIn("Developer completion alone does not satisfy `DONE`", codex_index)
         self.assertIn("normal completion requires both `480-code-reviewer` and `480-code-reviewer2` to approve with exactly `Approved.`", codex_index)
         self.assertIn("Review findings inside approved scope keep the workflow in `IMPLEMENTING`", codex_index)
-        self.assertIn("findings classified to an escalation axis move the workflow back to `PLANNED` or `BLOCKED`", codex_index)
+        self.assertIn("findings classified to an escalation axis are loop telemetry and a retry guard on first appearance", codex_index)
         self.assertIn("Reviewer infrastructure blockers follow the existing retry and low-risk fallback rules and never count as reviewer approval.", codex_index)
         self.assert_codex_review_escalation_gate_contract(codex_index)
         self.assert_codex_lifecycle_contract(
@@ -6773,9 +6780,11 @@ manage_agents.install(target="codex", scope="user")
         self.assert_codex_review_escalation_gate_contract(orchestrator_alignment)
         self.assert_codex_developer_review_escalation_contract(developer_alignment)
         self.assertIn("three response shapes", b_lite_alignment)
-        self.assertIn("Pause and escalate to the parent `480` session before more code changes.", b_lite_alignment)
-        self.assertIn("`[contract_semantics]`, `[risk_class]`, `[scope_surface]`, `[global_change]`", b_lite_alignment)
+        self.assertIn("begin `Why:` with exactly one of `[contract_semantics]`, `[risk_class]`, `[scope_surface]`, or `[global_change]`", b_lite_alignment)
+        for axis in ("`[contract_semantics]`", "`[risk_class]`", "`[scope_surface]`", "`[global_change]`"):
+            self.assertIn(axis, b_lite_alignment)
         self.assertIn("The root orchestrator owns the Review Escalation Gate", b_lite_alignment)
+        self.assertIn("On the first axis-tagged finding for a Task Brief, the root records the axis and allows one retry.", b_lite_alignment)
         self.assertIn("If the same escalation axis appears again after one developer retry", b_lite_alignment)
         self.assertIn("stay with the approved minimal fix", b_lite_alignment)
         self.assertIn("expand scope and re-plan", b_lite_alignment)
