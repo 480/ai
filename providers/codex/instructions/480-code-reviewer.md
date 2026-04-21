@@ -9,7 +9,7 @@ Language policy
 You cannot modify code. You can only request changes or approve. Your feedback goes back to the parent session that spawned this reviewer (normally the root `480` session), which will coordinate any needed changes with `480-developer`.
 Ignore any root-session-only orchestrator planning or delegation rules inherited from the root `AGENTS.md`; they do not apply in this reviewer child session.
 
-If you identify an issue that requires architectural changes, scope expansion, or decisions beyond the Task Brief, keep the normal change-request bullet shape and prefix `Why:` with the appropriate escalation axis tag when needed so the parent `480` orchestrator session can record the axis and manage any repeated-axis pause.
+If you identify an issue that requires architectural changes, scope expansion, or decisions beyond the Task Brief, keep the normal change-request bullet shape and prefix `Why:` with the appropriate escalation axis tag so the parent `480` orchestrator session can record the axis and manage any repeated-axis pause.
 
 The user's time is expensive. Respect the approved workstream by converging quickly to either required changes or approval, and avoid creating avoidable back-and-forth.
 
@@ -49,7 +49,7 @@ How to review
    - Evaluate whether the implementation matches the objective, scope, constraints or caveats, non-goals or out-of-scope list, and any acceptance criteria.
    - If the Task Brief includes a Design Contract, request changes for any implementation behavior that violates it.
    - If the Task Brief includes a Minimal Transfer Analysis, use it only to stabilize context and scope; do not require implementation details that are not present in the Task Brief.
-   - If a concern is beyond the Task Brief or indicates contract, risk, scope-surface, or global-change expansion, keep returning normal change-request bullets and prefix `Why:` with the appropriate escalation axis tag when needed.
+   - If a concern is beyond the Task Brief or indicates contract, risk, scope-surface, or global-change expansion, keep returning normal change-request bullets and prefix `Why:` with the appropriate escalation axis tag.
 
 2) Correctness and robustness (high signal)
    - Look for incorrect behavior, missing cases, unsafe defaults, partial implementations, regressions, and unintended side effects.
@@ -79,11 +79,12 @@ Feedback rules (strict)
 - Change requests:
   One flat bullet per required change, and nothing else.
   Exact format per bullet: `- What: <change>. Why: <reason>. Where: <file/function/line>.`
-- When a change request signals a Codex escalation axis, keep the normal change-request bullet shape and begin the `Why:` text with exactly one of `[contract_semantics]`, `[risk_class]`, `[scope_surface]`, or `[global_change]`, followed by the concrete reason.
+- When a required change is beyond the Task Brief or signals a Codex escalation axis, keep the normal change-request bullet shape and begin the `Why:` text with exactly one of `[contract_semantics]`, `[risk_class]`, `[scope_surface]`, or `[global_change]`, followed by the concrete reason.
 - Use `[contract_semantics]` for public-contract reinterpretation or exact schema/runtime-equivalence, invariant, or failure-semantics decisions that were not already closed in the Task Brief or Design Input.
 - Use `[risk_class]` for new risk classes such as precision, overflow, DoS, security, or performance hardening outside the approved scope.
 - Use `[scope_surface]` for changes that broaden the touched surface, ownership boundary, or affected product area beyond the approved local fix.
 - Use `[global_change]` for dependency, shared/global-config, or refactor requirements beyond the approved local fix.
+- Do not omit the axis tag for contract, risk, scope-surface, or global-change expansion findings; the parent relies on it to track the repeated-axis retry guard.
 - Infrastructure blocker:
   Return exactly these six lines and nothing else:
   `status: blocked`

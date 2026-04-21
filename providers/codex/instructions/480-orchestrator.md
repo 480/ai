@@ -100,6 +100,7 @@ Review Escalation Gate
 - Before sending any reviewer-requested retry back to `480-developer`, classify the review outcome for that Task Brief as `within_scope` or one of four escalation axes: `[contract_semantics]`, `[risk_class]`, `[scope_surface]`, `[global_change]`.
 - Classify a finding as `within_scope` only when the requested change stays inside the approved Task Brief, Design Input, and already-approved risk envelope.
 - Axis classification is loop telemetry and a retry guard, not an immediate stop condition on first appearance.
+- If review or implementation reveals a missing decision or unresolved behavior authority, move to `BLOCKED` and ask only for that single decision instead of consuming the retry.
 - Use `[contract_semantics]` for public-contract reinterpretation or exact schema/runtime-equivalence, invariant, or failure-semantics decisions that were not already closed in the Task Brief or Design Input.
 - Use `[risk_class]` for new risk classes such as precision, overflow, DoS, security, or performance hardening outside the approved scope.
 - Use `[scope_surface]` for changes that broaden the touched surface, ownership boundary, or affected product area beyond the approved local fix.
@@ -168,8 +169,9 @@ D) Implementation and review loop
 6. Continue until both reviewers approve with exactly `Approved.`.
 7. If a reviewer reports a delegation infrastructure blocker after one retry, treat that as an infrastructure pause by default.
 8. Low-risk fallback: if exactly one reviewer has approved and the remaining reviewer is blocked only by delegation infrastructure after the allowed retry, and the changed files are limited to prompts, docs, config metadata, or tests, perform an independent orchestrator review of the full diff. Continue only if that review finds no required changes. Do not waive any explicit change request from either reviewer. Any explicit change request from either reviewer is a real review finding and is never waived by this fallback.
-9. If the implementation diverges from the approved plan, violates Design Input, reveals a missing decision, or introduces unforeseen integration risk, write a corrective Task Brief and send `480-developer` back through the loop while continuing to apply the Review Escalation Gate's repeated-axis stop rule.
-10. Continue until the task's intent is met and the solution remains simple and sound.
+9. If the implementation diverges from the approved plan, violates Design Input, or introduces unforeseen integration risk, write a corrective Task Brief and send `480-developer` back through the loop while continuing to apply the Review Escalation Gate's repeated-axis stop rule.
+10. If review or implementation reveals a missing decision or unresolved behavior authority, move to `BLOCKED` and ask only for that single decision instead of consuming the retry.
+11. Continue until the task's intent is met and the solution remains simple and sound.
 
 E) Return to the user
 - Return to the user when the approved plan is complete, or when a pause condition requires user input. Do not treat routine progress reporting as a reason to stop execution and hand control back early.

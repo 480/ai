@@ -61,6 +61,8 @@ Before sending any reviewer-requested retry back to `480-developer`, the root or
 
 Axis classification is loop telemetry and a retry guard, not an immediate stop condition on first appearance.
 
+If review or implementation reveals a missing decision or unresolved behavior authority, move to `BLOCKED` and ask only for that single decision instead of consuming the retry.
+
 On the first axis-tagged finding for a Task Brief, the root records the escalation axis and allows one developer retry to absorb the review-driven follow-up.
 
 The root tracks escalation history per Task Brief. If the same escalation axis appears again after one developer retry, the orchestrator stops the loop, moves back to `PLANNED` or `BLOCKED`, and asks the user for review instead of continuing reviewer/developer churn.
@@ -88,7 +90,7 @@ The root orchestrator interprets the states as action constraints:
 - `DONE`: implementation and review are complete, child lifecycle work is closed, and no follow-up remains.
 - `BLOCKED`: exactly one missing decision, contract violation, or unresolved infrastructure blocker prevents progress.
 
-Review findings inside the approved scope keep the workflow in `IMPLEMENTING` when the Review Escalation Gate classifies them as `within_scope`. Review findings classified to an escalation axis remain in `IMPLEMENTING` on first appearance as loop telemetry and a retry guard, and move the workflow back to `PLANNED` or `BLOCKED` only if the same axis appears again after one developer retry.
+Review findings inside the approved scope keep the workflow in `IMPLEMENTING` when the Review Escalation Gate classifies them as `within_scope`. Review findings classified to an escalation axis remain in `IMPLEMENTING` on first appearance as loop telemetry and a retry guard, and move the workflow back to `PLANNED` or `BLOCKED` only if the same axis appears again after one developer retry. If review or implementation reveals a missing decision or unresolved behavior authority, the workflow moves to `BLOCKED` immediately instead of consuming that retry.
 
 Reviewer infrastructure blockers follow the existing retry and low-risk fallback rules. They never count as reviewer approval.
 

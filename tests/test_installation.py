@@ -348,15 +348,15 @@ class InstallationTests(unittest.TestCase):
 
     def assert_codex_reviewer_pause_contract(self, text: str) -> None:
         self.assertIn(
-            "If you identify an issue that requires architectural changes, scope expansion, or decisions beyond the Task Brief, keep the normal change-request bullet shape and prefix `Why:` with the appropriate escalation axis tag when needed",
+            "If you identify an issue that requires architectural changes, scope expansion, or decisions beyond the Task Brief, keep the normal change-request bullet shape and prefix `Why:` with the appropriate escalation axis tag so the parent `480` orchestrator session can record the axis and manage any repeated-axis pause.",
             text,
         )
         self.assertIn(
-            "If a concern is beyond the Task Brief or indicates contract, risk, scope-surface, or global-change expansion, keep returning normal change-request bullets",
+            "If a concern is beyond the Task Brief or indicates contract, risk, scope-surface, or global-change expansion, keep returning normal change-request bullets and prefix `Why:` with the appropriate escalation axis tag.",
             text,
         )
         self.assertIn(
-            "When a change request signals a Codex escalation axis, keep the normal change-request bullet shape",
+            "When a required change is beyond the Task Brief or signals a Codex escalation axis, keep the normal change-request bullet shape",
             text,
         )
         for axis in ("`[contract_semantics]`", "`[risk_class]`", "`[scope_surface]`", "`[global_change]`"):
@@ -366,6 +366,10 @@ class InstallationTests(unittest.TestCase):
         self.assertIn("precision, overflow, DoS, security, or performance hardening", text)
         self.assertIn("dependency, shared/global-config, or refactor requirements", text)
         self.assertIn(
+            "Do not omit the axis tag for contract, risk, scope-surface, or global-change expansion findings; the parent relies on it to track the repeated-axis retry guard.",
+            text,
+        )
+        self.assertIn(
             "Do not stack downstream hardening or broadening requests behind an axis-tagged concern.",
             text,
         )
@@ -373,6 +377,7 @@ class InstallationTests(unittest.TestCase):
             "Return only the concrete changes needed for the current retry.",
             text,
         )
+        self.assertNotIn("when needed", text)
         self.assertNotIn("Pause and escalate to the parent `480` session before more code changes.", text)
         self.assertNotIn("hard-boundary triggers include", text)
 
@@ -505,6 +510,10 @@ class InstallationTests(unittest.TestCase):
             self.assertIn(axis, text)
         self.assertIn(
             "Axis classification is loop telemetry and a retry guard, not an immediate stop condition on first appearance.",
+            text,
+        )
+        self.assertIn(
+            "If review or implementation reveals a missing decision or unresolved behavior authority, move to `BLOCKED` and ask only for that single decision instead of consuming the retry.",
             text,
         )
         self.assertTrue(
@@ -6505,6 +6514,10 @@ manage_agents.install(target="codex", scope="user")
         self.assertIn("normal completion requires both `480-code-reviewer` and `480-code-reviewer2` to approve with exactly `Approved.`", codex_index)
         self.assertIn("Review findings inside approved scope keep the workflow in `IMPLEMENTING`", codex_index)
         self.assertIn("findings classified to an escalation axis are loop telemetry and a retry guard on first appearance", codex_index)
+        self.assertIn(
+            "If review or implementation reveals a missing decision or unresolved behavior authority, move to `BLOCKED` and ask only for that single decision instead of consuming the retry.",
+            codex_index,
+        )
         self.assertIn("Reviewer infrastructure blockers follow the existing retry and low-risk fallback rules and never count as reviewer approval.", codex_index)
         self.assert_codex_review_escalation_gate_contract(codex_index)
         self.assert_codex_lifecycle_contract(
@@ -6780,12 +6793,20 @@ manage_agents.install(target="codex", scope="user")
         self.assert_codex_review_escalation_gate_contract(orchestrator_alignment)
         self.assert_codex_developer_review_escalation_contract(developer_alignment)
         self.assertIn("three response shapes", b_lite_alignment)
+        self.assertIn(
+            "they still return ordinary change-request bullets and must prefix `Why:` with the appropriate escalation axis tag.",
+            b_lite_alignment,
+        )
         self.assertIn("begin `Why:` with exactly one of `[contract_semantics]`, `[risk_class]`, `[scope_surface]`, or `[global_change]`", b_lite_alignment)
         for axis in ("`[contract_semantics]`", "`[risk_class]`", "`[scope_surface]`", "`[global_change]`"):
             self.assertIn(axis, b_lite_alignment)
         self.assertIn("The root orchestrator owns the Review Escalation Gate", b_lite_alignment)
         self.assertIn("On the first axis-tagged finding for a Task Brief, the root records the axis and allows one retry.", b_lite_alignment)
         self.assertIn("If the same escalation axis appears again after one developer retry", b_lite_alignment)
+        self.assertIn(
+            "If review or implementation reveals a missing decision or unresolved behavior authority, move to `BLOCKED` and ask only for that single decision instead of consuming the retry.",
+            b_lite_alignment,
+        )
         self.assertIn("stay with the approved minimal fix", b_lite_alignment)
         self.assertIn("expand scope and re-plan", b_lite_alignment)
 

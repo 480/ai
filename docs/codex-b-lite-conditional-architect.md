@@ -123,13 +123,13 @@ MTA-backed minimal maintenance remains local unless the parent explicitly re-app
 
 Reviewers check implementation against the Task Brief and any embedded Design Input. Design Contract violations are required changes.
 
-Reviewers preserve the existing three response shapes. When a finding is beyond the Task Brief or suggests contract, risk, scope-surface, or global expansion, they still return ordinary change-request bullets.
+Reviewers preserve the existing three response shapes. When a finding is beyond the Task Brief or suggests contract, risk, scope-surface, or global expansion, they still return ordinary change-request bullets and must prefix `Why:` with the appropriate escalation axis tag.
 
 When a change request signals a Codex escalation axis, reviewers keep the normal change-request bullet shape and begin `Why:` with exactly one of `[contract_semantics]`, `[risk_class]`, `[scope_surface]`, or `[global_change]`.
 
 Reviewers do not stack downstream hardening or broadening requests behind an axis-tagged concern. They return only the concrete changes needed for the current retry.
 
-The root orchestrator owns the Review Escalation Gate and classifies review outcomes as `within_scope` or one escalation axis before any retry goes back to `480-developer`. On the first axis-tagged finding for a Task Brief, the root records the axis and allows one retry. If the same escalation axis appears again after one developer retry, the root stops the loop, moves back to `PLANNED` or `BLOCKED`, and asks the user whether to stay with the approved minimal fix or expand scope and re-plan.
+The root orchestrator owns the Review Escalation Gate and classifies review outcomes as `within_scope` or one escalation axis before any retry goes back to `480-developer`. On the first axis-tagged finding for a Task Brief, the root records the axis and allows one retry. If the same escalation axis appears again after one developer retry, the root stops the loop, moves back to `PLANNED` or `BLOCKED`, and asks the user whether to stay with the approved minimal fix or expand scope and re-plan. If review or implementation reveals a missing decision or unresolved behavior authority, move to `BLOCKED` and ask only for that single decision instead of consuming the retry.
 
 ## Non-goals
 

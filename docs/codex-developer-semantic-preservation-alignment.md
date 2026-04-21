@@ -40,6 +40,8 @@ Mode B applies only when the Task Brief includes Minimal Transfer Analysis in `D
 
 An axis-tagged review request is not by itself a blocker on first appearance. The developer may absorb one retry when the requested changes can still be implemented safely within the approved behavior authority.
 
+If review or implementation reveals a missing decision or unresolved behavior authority, move to `BLOCKED` and ask only for that single decision instead of consuming the retry.
+
 MTA-backed minimal maintenance remains local unless the parent explicitly re-approves broader contract or risk-hardening work.
 
 If the Task Brief lacks Design Input, or if satisfying a requested expected behavior would require behavior-changing work, the developer must stop and request parent correction instead of inferring new behavior.
@@ -84,6 +86,7 @@ The implementation is covered by installation and rendering tests that verify:
 - Missing Design Input returns `BLOCKED`.
 - MTA cannot authorize new behavior, policy changes, invariant changes, or scope expansion.
 - Axis-tagged review follow-up is absorbable once when it stays within approved behavior authority.
+- Missing decisions surfaced during review still move the workflow to `BLOCKED` instead of consuming the retry.
 - MTA-backed maintenance stays local unless the parent explicitly re-approves broader contract or risk-hardening work.
 - Unclear behavior authority returns `BLOCKED`.
 - Non-Codex developer prompts do not gain Codex-only implementation-agent wording.
